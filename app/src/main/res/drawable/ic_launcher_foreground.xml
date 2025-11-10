@@ -1,0 +1,50 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Album cover panel -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.18"
+        android:pathData="M24,30h60v44h-60z" />
+    <!-- Album bottom flap -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.24"
+        android:pathData="M24,62h60v18h-60z" />
+    <!-- Lens outer ring -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,48a24,24 0 1,0 0,48a24,24 0 1,0 0,-48" />
+    <!-- Lens mid ring -->
+    <path
+        android:fillColor="#7E57C2"
+        android:pathData="M54,54a18,18 0 1,0 0,36a18,18 0 1,0 0,-36" />
+    <!-- Lens inner core -->
+    <path
+        android:fillColor="#4527A0"
+        android:pathData="M54,60a12,12 0 1,0 0,24a12,12 0 1,0 0,-24" />
+    <!-- Lens highlight -->
+    <path
+        android:fillColor="#B39DDB"
+        android:fillAlpha="0.6"
+        android:pathData="M54,52c12,0 21,8 24,18c-5,-4 -11,-6 -18,-6c-18,0 -33,15 -33,33c0,7 2,13 6,18c-11,-5 -18,-16 -18,-29c0,-19 16,-34 35,-34z" />
+    <!-- Sun badge -->
+    <path
+        android:fillColor="#FFD93D"
+        android:pathData="M78,34a8,8 0 1,0 0,16a8,8 0 1,0 0,-16" />
+    <path
+        android:fillColor="#F4B400"
+        android:fillAlpha="0.8"
+        android:pathData="M78,30l2.5,6.5l6.9,0.7l-5.4,4.2l1.8,6.7l-5.8,-3.7l-5.8,3.7l1.8,-6.7l-5.4,-4.2l6.9,-0.7z" />
+    <!-- Film strip details -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.6"
+        android:pathData="M30,36h14v4h-14z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.6"
+        android:pathData="M64,36h14v4h-14z" />
+</vector>
