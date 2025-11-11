@@ -56,7 +56,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:textColor="@color/white"
-                    android:textSize="14sp"
+                    android:textSize="@dimen/image_info_title"
                     android:textStyle="bold" />
 
                 <TextView
@@ -65,7 +65,7 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:textColor="#CCCCCC"
-                    android:textSize="12sp"
+                    android:textSize="@dimen/image_info_subtitle"
                     android:ellipsize="end"
                     android:singleLine="true" />
             </LinearLayout>
@@ -77,9 +77,9 @@
                 android:layout_gravity="bottom|start"
                 android:layout_margin="0dp"
                 android:background="#AA000000"
-                android:padding="2dp"
+                android:padding="@dimen/location_padding"
                 android:textColor="@color/white"
-                android:textSize="14sp"
+                android:textSize="@dimen/image_location"
                 android:visibility="gone" />
         </FrameLayout>
 
@@ -124,7 +124,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:textColor="@color/white"
-                    android:textSize="14sp"
+                    android:textSize="@dimen/image_info_title"
                     android:textStyle="bold" />
 
                 <TextView
@@ -133,7 +133,7 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:textColor="#CCCCCC"
-                    android:textSize="12sp"
+                    android:textSize="@dimen/image_info_subtitle"
                     android:ellipsize="end"
                     android:singleLine="true" />
             </LinearLayout>
@@ -145,9 +145,9 @@
                 android:layout_gravity="bottom|start"
                 android:layout_margin="0dp"
                 android:background="#AA000000"
-                android:padding="2dp"
+                android:padding="@dimen/location_padding"
                 android:textColor="@color/white"
-                android:textSize="14sp"
+                android:textSize="@dimen/image_location"
                 android:visibility="gone" />
         </FrameLayout>
 
@@ -192,7 +192,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:textColor="@color/white"
-                    android:textSize="14sp"
+                    android:textSize="@dimen/image_info_title"
                     android:textStyle="bold" />
 
                 <TextView
@@ -201,7 +201,7 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:textColor="#CCCCCC"
-                    android:textSize="12sp"
+                    android:textSize="@dimen/image_info_subtitle"
                     android:ellipsize="end"
                     android:singleLine="true" />
             </LinearLayout>
@@ -213,9 +213,9 @@
                 android:layout_gravity="bottom|start"
                 android:layout_margin="0dp"
                 android:background="#AA000000"
-                android:padding="2dp"
+                android:padding="@dimen/location_padding"
                 android:textColor="@color/white"
-                android:textSize="14sp"
+                android:textSize="@dimen/image_location"
                 android:visibility="gone" />
         </FrameLayout>
 
@@ -260,7 +260,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:textColor="@color/white"
-                    android:textSize="14sp"
+                    android:textSize="@dimen/image_info_title"
                     android:textStyle="bold" />
 
                 <TextView
@@ -269,7 +269,7 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:textColor="#CCCCCC"
-                    android:textSize="12sp"
+                    android:textSize="@dimen/image_info_subtitle"
                     android:ellipsize="end"
                     android:singleLine="true" />
             </LinearLayout>
@@ -281,9 +281,9 @@
                 android:layout_gravity="bottom|start"
                 android:layout_margin="0dp"
                 android:background="#AA000000"
-                android:padding="2dp"
+                android:padding="@dimen/location_padding"
                 android:textColor="@color/white"
-                android:textSize="14sp"
+                android:textSize="@dimen/image_location"
                 android:visibility="gone" />
         </FrameLayout>
 

@@ -512,8 +512,8 @@ public class FirstFragment extends Fragment {
                                 // 获取文件大小
                                 String fileSize = getFileSize(item.path);
 
-                                detailText.append(String.format("Resolution: %s | Codec: %s | Bitrate: %s | FPS: %s | Size: %s",
-                                        resolution, codec, bitrate, fps, fileSize));
+                                detailText.append(String.format("Res: %s %sp | Codec: %s | Bitrate: %s",
+                                        resolution, fps, codec, bitrate));
                             }
                         }
                         break;
