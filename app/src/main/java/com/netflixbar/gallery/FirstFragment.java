@@ -77,7 +77,8 @@ public class FirstFragment extends Fragment {
     private static final int GRID_COLUMNS = 2;
     private static final int GRID_ROWS = 2;
     private static final int MAX_VIDEO_SLOTS = 1;
-    private int SCREEN_SHOW_COUNT = GRID_COLUMNS * GRID_ROWS;
+    private static final int GRID_SLOT_COUNT = GRID_COLUMNS * GRID_ROWS;
+    private static final int SINGLE_MODE_CACHE_COUNT = 12;
     private int PAGE_SIZE = 1;
     private long CHANGE_TIMER = 1000 * 60 * 10;
     private static final int VIDEO_BUFFER_MS = 3000;
@@ -89,8 +90,14 @@ public class FirstFragment extends Fragment {
     private SettingsDialog settingsDialog;
     private static final String PREFS_NAME = "gallery_settings";
     private static final String KEY_CHANGE_INTERVAL = "change_interval";
+    private static final String KEY_DISPLAY_MODE = "display_mode";
+    private static final String DISPLAY_MODE_GRID = "grid";
+    private static final String DISPLAY_MODE_SINGLE = "single";
     private GestureDetector gestureDetector;
     private boolean hasMediaContent = false;
+    private String currentDisplayMode = DISPLAY_MODE_GRID;
+    private final List<PicItem> singleModeItems = new ArrayList<>();
+    private int singleModeIndex = 0;
     private long nextRefreshDelayMs = CHANGE_TIMER;
     private boolean refreshScheduled = false;
     private final Runnable refreshRunnable = this::loadImage;
@@ -173,6 +180,8 @@ public class FirstFragment extends Fragment {
         
         // Load saved interval from preferences
         loadChangeInterval();
+        loadDisplayMode();
+        applyDisplayModeLayout();
         
         // Setup long press gesture detector for settings
         gestureDetector = new GestureDetector(requireContext(), new GestureDetector.SimpleOnGestureListener() {
@@ -184,7 +193,7 @@ public class FirstFragment extends Fragment {
         
         // Set touch listener on root view
         view.setOnTouchListener((v, event) -> gestureDetector.onTouchEvent(event));
-        
+
         scanExternalStorageMedia();
         if (hasImagePermission()) {
             loadImage();
@@ -305,11 +314,12 @@ public class FirstFragment extends Fragment {
                 return;
             }
 
+            int desiredCount = DISPLAY_MODE_SINGLE.equals(currentDisplayMode) ? SINGLE_MODE_CACHE_COUNT : GRID_SLOT_COUNT;
             List<PicItem> imagelist= new ArrayList<>();
             int maxAttempts = pageCount > 0 ? pageCount * 2 : 10;
             int attempts = 0;
-            while (imagelist.size() < SCREEN_SHOW_COUNT && attempts < maxAttempts) {
-                randLoadImage(cr, pageCount, imagelist, includeVideo);
+            while (imagelist.size() < desiredCount && attempts < maxAttempts) {
+                randLoadImage(cr, pageCount, imagelist, includeVideo, desiredCount);
                 attempts++;
             }
             if (imagelist.isEmpty()) {
@@ -319,29 +329,42 @@ public class FirstFragment extends Fragment {
             }
 
             Pair<Integer, Integer> dm = Utils.getScreenSize(getActivity());
-            ImageView[] imgViewList = {binding.imgview1, binding.imgview2, binding.imgview3, binding.imgview4};
-            PlayerView[] playerViewList = {binding.videoView1, binding.videoView2, binding.videoView3, binding.videoView4};
-            int slotWidth = dm.first / GRID_COLUMNS;
-            int slotHeight = dm.second / GRID_ROWS;
-            for(int i=0; i<SCREEN_SHOW_COUNT; i++){
-                ImageView imageView = imgViewList[i];
-                PlayerView playerView = playerViewList[i];
-                if (i < imagelist.size()) {
-                    PicItem item = imagelist.get(i);
-                    Log.i("getLocation path:", item.path);
-                    if (item.isVideo) {
-                        showVideo(item, imageView, playerView);
-                    } else {
-                        showImage(item, imageView, playerView, slotWidth, slotHeight);
+            if (DISPLAY_MODE_SINGLE.equals(currentDisplayMode)) {
+                singleModeItems.clear();
+                singleModeItems.addAll(imagelist);
+                hasMediaContent = !singleModeItems.isEmpty();
+                applyDisplayModeLayout();
+                if (hasMediaContent) {
+                    singleModeIndex = Math.min(singleModeIndex, Math.max(0, singleModeItems.size() - 1));
+                    if (singleModeIndex >= singleModeItems.size()) {
+                        singleModeIndex = 0;
                     }
+                    displaySingleModeItem(dm.first, dm.second);
                 } else {
-                    hideMediaSlot(imageView, playerView);
+                    clearSingleModeDisplay();
                 }
-
+            } else {
+                ImageView[] imgViewList = {binding.imgview1, binding.imgview2, binding.imgview3, binding.imgview4};
+                PlayerView[] playerViewList = {binding.videoView1, binding.videoView2, binding.videoView3, binding.videoView4};
+                int slotWidth = dm.first / GRID_COLUMNS;
+                int slotHeight = dm.second / GRID_ROWS;
+                for(int i=0; i<GRID_SLOT_COUNT; i++){
+                    ImageView imageView = imgViewList[i];
+                    PlayerView playerView = playerViewList[i];
+                    if (i < imagelist.size()) {
+                        PicItem item = imagelist.get(i);
+                        Log.i("getLocation path:", item.path);
+                        if (item.isVideo) {
+                            showVideo(item, imageView, playerView);
+                        } else {
+                            showImage(item, imageView, playerView, slotWidth, slotHeight);
+                        }
+                    } else {
+                        hideMediaSlot(imageView, playerView);
+                    }
+                }
+                hasMediaContent = true;
             }
-            hasMediaContent = true;
-//            Bitmap bitmap1 = ImageUtils.LoadBitmap(imagelist.get(0).path, dm.first / SCREEN_SHOW_COUNT, dm.second);
-//            binding.imgview1.setImageBitmap(bitmap1);
         } else {
             hasMediaContent = false;
         }
@@ -401,6 +424,171 @@ public class FirstFragment extends Fragment {
         playerView.setVisibility(View.GONE);
         hideVideoInfo(playerView);
         hideImageLocation(imageView);
+    }
+
+    private void clearSingleModeDisplay() {
+        if (binding == null) {
+            return;
+        }
+        binding.singleImageView.setImageDrawable(null);
+        binding.singleImageView.setVisibility(View.GONE);
+        binding.singleVideoView.setPlayer(null);
+        binding.singleVideoView.setVisibility(View.GONE);
+        binding.singleVideoInfo.setVisibility(View.GONE);
+        binding.singleImageLocation.setVisibility(View.GONE);
+    }
+
+    private void applyDisplayModeLayout() {
+        if (binding == null) {
+            return;
+        }
+        boolean singleMode = DISPLAY_MODE_SINGLE.equals(currentDisplayMode);
+        binding.singleImageContainer.setVisibility(singleMode ? View.VISIBLE : View.GONE);
+        binding.mediaGrid.setVisibility(singleMode ? View.GONE : View.VISIBLE);
+    }
+
+    private void displaySingleModeItem(int screenWidth, int screenHeight) {
+        if (binding == null || singleModeItems.isEmpty() || singleModeIndex < 0 || singleModeIndex >= singleModeItems.size()) {
+            clearSingleModeDisplay();
+            return;
+        }
+        PicItem item = singleModeItems.get(singleModeIndex);
+        if (item.isVideo) {
+            binding.singleImageView.setVisibility(View.GONE);
+            showVideoInSingleMode(item);
+        } else {
+            showImageInSingleMode(item, screenWidth, screenHeight);
+        }
+    }
+
+    private void showImageInSingleMode(PicItem item, int screenWidth, int screenHeight) {
+        binding.singleVideoView.setPlayer(null);
+        binding.singleVideoView.setVisibility(View.GONE);
+        binding.singleVideoInfo.setVisibility(View.GONE);
+        binding.singleImageView.setVisibility(View.VISIBLE);
+        Bitmap bmp = decodeScaledBitmap(item, screenWidth, screenHeight);
+        if (bmp != null) {
+            binding.singleImageView.setImageBitmap(bmp);
+        } else {
+            binding.singleImageView.setImageDrawable(null);
+        }
+        updateSingleLocation(item);
+    }
+
+    private void showVideoInSingleMode(PicItem item) {
+        binding.singleImageView.setImageDrawable(null);
+        binding.singleImageView.setVisibility(View.GONE);
+        binding.singleVideoView.setVisibility(View.VISIBLE);
+
+        DefaultRenderersFactory renderersFactory = new DefaultRenderersFactory(requireContext())
+                .setEnableDecoderFallback(true)
+                .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER);
+
+        DefaultLoadControl loadControl = new DefaultLoadControl.Builder()
+                .setBufferDurationsMs(
+                        VIDEO_BACKBUFFER_MS,
+                        VIDEO_BUFFER_MS,
+                        VIDEO_BACKBUFFER_MS,
+                        VIDEO_BACKBUFFER_MS)
+                .build();
+
+        ExoPlayer player = new ExoPlayer.Builder(requireContext(), renderersFactory)
+                .setLoadControl(loadControl)
+                .build();
+
+        TrackSelectionParameters.Builder trackBuilder = player.getTrackSelectionParameters().buildUpon()
+                .setPreferredVideoMimeTypes(
+                        MimeTypes.VIDEO_H265,
+                        MimeTypes.VIDEO_H264,
+                        MimeTypes.VIDEO_VP9,
+                        MimeTypes.VIDEO_AV1);
+        player.setTrackSelectionParameters(trackBuilder.build());
+        player.setRepeatMode(Player.REPEAT_MODE_ALL);
+        player.setMediaItem(MediaItem.fromUri(item.contentUri));
+        player.addListener(new Player.Listener() {
+            @Override
+            public void onPlaybackStateChanged(int state) {
+                if (state == Player.STATE_READY) {
+                    long duration = player.getDuration();
+                    if (duration != C.TIME_UNSET) {
+                        extendRefreshIfNeeded(duration);
+                    }
+                    updateSingleVideoInfo(item, player);
+                    handler.postDelayed(() -> {
+                        if (binding.singleVideoView.getPlayer() == player) {
+                            updateSingleVideoInfo(item, player);
+                        }
+                    }, 2000);
+                }
+            }
+
+            @Override
+            public void onTracksChanged(com.google.android.exoplayer2.Tracks tracks) {
+                updateSingleVideoInfo(item, player);
+            }
+        });
+        player.prepare();
+        long immediateDuration = player.getDuration();
+        if (immediateDuration != C.TIME_UNSET) {
+            extendRefreshIfNeeded(immediateDuration);
+        }
+        player.play();
+        binding.singleVideoView.setPlayer(player);
+        activePlayers.add(player);
+        updateSingleLocation(item);
+    }
+
+    private void updateSingleLocation(PicItem item) {
+        if (TextUtils.isEmpty(item.gpsLocation)) {
+            binding.singleImageLocation.setVisibility(View.GONE);
+            return;
+        }
+        binding.singleImageLocation.setVisibility(View.VISIBLE);
+        if (isNetworkAvailable()) {
+            getLocation(item.gpsLocation, binding.singleImageLocation);
+        }
+    }
+
+    private void updateSingleVideoInfo(PicItem item, ExoPlayer player) {
+        String fileName = new java.io.File(item.path).getName();
+        StringBuilder detailText = new StringBuilder();
+        try {
+            com.google.android.exoplayer2.Tracks tracks = player.getCurrentTracks();
+            if (tracks != null) {
+                for (com.google.android.exoplayer2.Tracks.Group group : tracks.getGroups()) {
+                    if (group.getType() == com.google.android.exoplayer2.C.TRACK_TYPE_VIDEO && group.isSelected()) {
+                        int selectedIndex = -1;
+                        for (int i = 0; i < group.length; i++) {
+                            if (group.isTrackSelected(i)) {
+                                selectedIndex = i;
+                                break;
+                            }
+                        }
+                        if (selectedIndex >= 0) {
+                            Format format = group.getTrackFormat(selectedIndex);
+                            if (format != null) {
+                                String resolution = format.width + "x" + format.height;
+                                String codec = format.sampleMimeType != null ? format.sampleMimeType : "Unknown";
+                                String fps = format.frameRate != Format.NO_VALUE ?
+                                        String.format("%.0f fps", format.frameRate) : "Unknown";
+                                String bitrate = getVideoBitrate(format, item, player);
+                                detailText.append(String.format("Res: %s %sp | Codec: %s | Bitrate: %s",
+                                        resolution, fps, codec, bitrate));
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.e("FirstFragment", "Error getting single video info", e);
+        }
+        if (detailText.length() == 0) {
+            detailText.append("Loading video info...");
+        }
+        binding.singleVideoTitle.setText(fileName + " - ");
+        binding.singleVideoDetails.setText(detailText.toString());
+        binding.singleVideoInfo.setVisibility(View.VISIBLE);
     }
 
     private void showVideo(PicItem item, ImageView imageView, PlayerView playerView) {
@@ -512,7 +700,7 @@ public class FirstFragment extends Fragment {
                                 // 获取文件大小
                                 String fileSize = getFileSize(item.path);
 
-                                detailText.append(String.format("Res: %s %sp | Codec: %s | Bitrate: %s",
+                                detailText.append(String.format("Res: %s %s | Codec: %s | Bitrate: %s",
                                         resolution, fps, codec, bitrate));
                             }
                         }
@@ -698,6 +886,7 @@ public class FirstFragment extends Fragment {
             binding.videoView2.setPlayer(null);
             binding.videoView3.setPlayer(null);
             binding.videoView4.setPlayer(null);
+            binding.singleVideoView.setPlayer(null);
         }
         System.gc();
     }
@@ -900,7 +1089,7 @@ public class FirstFragment extends Fragment {
     }
 
 
-    private void randLoadImage(ContentResolver cr, int pageCount, List<PicItem> imglist, boolean includeVideo){
+    private void randLoadImage(ContentResolver cr, int pageCount, List<PicItem> imglist, boolean includeVideo, int desiredCount){
         Log.i("randLoadImage", "start");
         int selectPage = getRandNum(pageCount);
         Log.i("randLoadImage", "pageCount="+pageCount);
@@ -941,7 +1130,7 @@ public class FirstFragment extends Fragment {
                         continue;
                     }
                     if (mediaType == MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO) {
-                        if (includeVideo && imglist.size() < SCREEN_SHOW_COUNT && !listContains(imglist,filePath)
+                        if (includeVideo && imglist.size() < desiredCount && !listContains(imglist,filePath)
                                 && getVideoCount(imglist) < MAX_VIDEO_SLOTS){
                             long duration = 0L;
                             int durationIndex = cursor.getColumnIndex(MediaStore.Video.VideoColumns.DURATION);
@@ -954,13 +1143,13 @@ public class FirstFragment extends Fragment {
                     } else if (mediaType == MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE) {
                         int oriVal = landScapeValue(filePath);
                         String gpsLocation = getGpsLocation(filePath);
-                        if(oriVal >= 0 && imglist.size() < SCREEN_SHOW_COUNT && !listContains(imglist,filePath)){
+                        if(oriVal >= 0 && imglist.size() < desiredCount && !listContains(imglist,filePath)){
                             Uri uri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, itemId);
                             imglist.add(new PicItem(filePath, oriVal, gpsLocation, false, uri, CHANGE_TIMER));
                         }
                     }
                     fetched++;
-                } while (cursor.moveToNext() && fetched < PAGE_SIZE && imglist.size() < SCREEN_SHOW_COUNT);
+                } while (cursor.moveToNext() && fetched < PAGE_SIZE && imglist.size() < desiredCount);
             }
             do {
                 // no-op, processed in loop above
@@ -999,18 +1188,23 @@ public class FirstFragment extends Fragment {
         Log.i("FirstFragment", "Loaded change interval: " + CHANGE_TIMER + " ms");
     }
 
+    private void loadDisplayMode() {
+        SharedPreferences preferences = requireContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        currentDisplayMode = preferences.getString(KEY_DISPLAY_MODE, DISPLAY_MODE_GRID);
+        Log.i("FirstFragment", "Loaded display mode: " + currentDisplayMode);
+    }
+
     private void showSettingsDialog() {
-        settingsDialog = new SettingsDialog(requireContext(), newInterval -> {
+        settingsDialog = new SettingsDialog(requireContext(), (newInterval, newDisplayMode) -> {
             CHANGE_TIMER = newInterval;
-            Log.i("FirstFragment", "Settings updated, new interval: " + CHANGE_TIMER + " ms");
-            // Restart image loading with new interval
+            currentDisplayMode = newDisplayMode;
+            singleModeIndex = 0;
+            Log.i("FirstFragment", "Settings updated, interval: " + CHANGE_TIMER + " ms, display mode: " + currentDisplayMode);
+            applyDisplayModeLayout();
             handler.removeCallbacksAndMessages(null);
-            // Schedule the next load with the new interval
-            handler.postDelayed(() -> {
-                if (hasImagePermission()) {
-                    loadImage();
-                }
-            }, CHANGE_TIMER);
+            if (hasImagePermission()) {
+                loadImage();
+            }
         });
         settingsDialog.show();
     }

@@ -8,6 +8,69 @@
     android:padding="0dp"
     tools:context=".FirstFragment">
 
+    <FrameLayout
+        android:id="@+id/singleImageContainer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone">
+
+        <ImageView
+            android:id="@+id/singleImageView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="centerCrop" />
+
+        <com.google.android.exoplayer2.ui.PlayerView
+            android:id="@+id/singleVideoView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone"
+            app:surface_type="surface_view"
+            app:use_controller="false" />
+
+        <LinearLayout
+            android:id="@+id/singleVideoInfo"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top"
+            android:background="#CC000000"
+            android:orientation="horizontal"
+            android:padding="8dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/singleVideoTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/white"
+                android:textSize="@dimen/image_info_title"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/singleVideoDetails"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textColor="#CCCCCC"
+                android:textSize="@dimen/image_info_subtitle"
+                android:ellipsize="end"
+                android:singleLine="true" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/singleImageLocation"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|start"
+            android:layout_margin="@dimen/location_margin"
+            android:background="#AA000000"
+            android:padding="@dimen/location_padding"
+            android:textColor="@color/white"
+            android:textSize="@dimen/image_location"
+            android:visibility="gone" />
+
+    </FrameLayout>
+
     <androidx.gridlayout.widget.GridLayout
         android:id="@+id/mediaGrid"
         android:layout_width="match_parent"

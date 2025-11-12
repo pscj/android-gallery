@@ -7,6 +7,11 @@
     <string name="next">Next</string>
     <string name="previous">Previous</string>
 
+    <string name="display_mode_title">显示模式</string>
+    <string name="display_mode_grid">四分屏</string>
+    <string name="display_mode_single">单图模式</string>
+    <string name="display_mode_summary">选择图片显示方式</string>
+
     <string name="hello_first_fragment">Hello first fragment</string>
     <string name="hello_second_fragment">Hello second fragment. Arg: %1$s</string>
 </resources>
