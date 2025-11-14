@@ -1,0 +1,272 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/black">
+
+    <FrameLayout
+        android:id="@+id/frame_portrait_left"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_margin="4dp"
+        android:background="@color/black"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintWidth_percent="0.3">
+
+        <ImageView
+            android:id="@+id/imgview1"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="fitCenter" />
+
+        <com.google.android.exoplayer2.ui.PlayerView
+            android:id="@+id/videoView1"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone"
+            app:surface_type="surface_view"
+            app:use_controller="false" />
+
+        <LinearLayout
+            android:id="@+id/videoInfo1"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top"
+            android:background="#CC000000"
+            android:orientation="horizontal"
+            android:padding="8dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/videoTitle1"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/white"
+                android:textSize="@dimen/image_info_title"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/videoDetails1"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:singleLine="true"
+                android:textColor="#CCCCCC"
+                android:textSize="@dimen/image_info_subtitle" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/imageLocation1"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|start"
+            android:background="#AA000000"
+            android:padding="@dimen/location_padding"
+            android:textColor="@color/white"
+            android:textSize="@dimen/image_location"
+            android:visibility="gone" />
+    </FrameLayout>
+
+    <FrameLayout
+        android:id="@+id/frame_portrait_right"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_margin="4dp"
+        android:background="@color/black"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintWidth_percent="0.3">
+
+        <ImageView
+            android:id="@+id/imgview2"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="fitCenter" />
+
+        <com.google.android.exoplayer2.ui.PlayerView
+            android:id="@+id/videoView2"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone"
+            app:surface_type="surface_view"
+            app:use_controller="false" />
+
+        <LinearLayout
+            android:id="@+id/videoInfo2"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top"
+            android:background="#CC000000"
+            android:orientation="horizontal"
+            android:padding="8dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/videoTitle2"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/white"
+                android:textSize="@dimen/image_info_title"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/videoDetails2"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:singleLine="true"
+                android:textColor="#CCCCCC"
+                android:textSize="@dimen/image_info_subtitle" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/imageLocation2"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|start"
+            android:background="#AA000000"
+            android:padding="@dimen/location_padding"
+            android:textColor="@color/white"
+            android:textSize="@dimen/image_location"
+            android:visibility="gone" />
+    </FrameLayout>
+
+    <FrameLayout
+        android:id="@+id/frame_landscape_top"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_margin="4dp"
+        android:background="@color/black"
+        app:layout_constraintStart_toEndOf="@id/frame_portrait_left"
+        app:layout_constraintEnd_toStartOf="@id/frame_portrait_right"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintHeight_percent="0.45">
+
+        <ImageView
+            android:id="@+id/imgview3"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="fitCenter" />
+
+        <com.google.android.exoplayer2.ui.PlayerView
+            android:id="@+id/videoView3"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone"
+            app:surface_type="surface_view"
+            app:use_controller="false" />
+
+        <LinearLayout
+            android:id="@+id/videoInfo3"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top"
+            android:background="#CC000000"
+            android:orientation="horizontal"
+            android:padding="8dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/videoTitle3"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/white"
+                android:textSize="@dimen/image_info_title"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/videoDetails3"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:singleLine="true"
+                android:textColor="#CCCCCC"
+                android:textSize="@dimen/image_info_subtitle" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/imageLocation3"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|start"
+            android:background="#AA000000"
+            android:padding="@dimen/location_padding"
+            android:textColor="@color/white"
+            android:textSize="@dimen/image_location"
+            android:visibility="gone" />
+    </FrameLayout>
+
+    <FrameLayout
+        android:id="@+id/frame_landscape_bottom"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_margin="4dp"
+        android:background="@color/black"
+        app:layout_constraintStart_toEndOf="@id/frame_portrait_left"
+        app:layout_constraintEnd_toStartOf="@id/frame_portrait_right"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/frame_landscape_top">
+
+        <ImageView
+            android:id="@+id/imgview4"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="fitCenter" />
+
+        <com.google.android.exoplayer2.ui.PlayerView
+            android:id="@+id/videoView4"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone"
+            app:surface_type="surface_view"
+            app:use_controller="false" />
+
+        <LinearLayout
+            android:id="@+id/videoInfo4"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top"
+            android:background="#CC000000"
+            android:orientation="horizontal"
+            android:padding="8dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/videoTitle4"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/white"
+                android:textSize="@dimen/image_info_title"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/videoDetails4"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:singleLine="true"
+                android:textColor="#CCCCCC"
+                android:textSize="@dimen/image_info_subtitle" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/imageLocation4"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|start"
+            android:background="#AA000000"
+            android:padding="@dimen/location_padding"
+            android:textColor="@color/white"
+            android:textSize="@dimen/image_location"
+            android:visibility="gone" />
+    </FrameLayout>
+
+</androidx.constraintlayout.widget.ConstraintLayout>

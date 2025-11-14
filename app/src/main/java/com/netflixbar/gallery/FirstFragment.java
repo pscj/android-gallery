@@ -34,6 +34,7 @@ import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.widget.TextView;
 
+import androidx.annotation.LayoutRes;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.activity.result.ActivityResultLauncher;
@@ -63,6 +64,7 @@ import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.Collections;
 import java.util.Date;
 import java.util.Map;
 import java.util.List;
@@ -98,9 +100,21 @@ public class FirstFragment extends Fragment {
     private String currentDisplayMode = DISPLAY_MODE_GRID;
     private final List<PicItem> singleModeItems = new ArrayList<>();
     private int singleModeIndex = 0;
+    private View currentMultiLayout;
+    private int currentLayoutResId = 0;
+    private final List<MediaSlot> currentMediaSlots = new ArrayList<>();
+    private final Random random = new Random();
     private long nextRefreshDelayMs = CHANGE_TIMER;
     private boolean refreshScheduled = false;
     private final Runnable refreshRunnable = this::loadImage;
+    private static final int[] IMAGE_VIEW_IDS = {R.id.imgview1, R.id.imgview2, R.id.imgview3, R.id.imgview4};
+    private static final int[] VIDEO_VIEW_IDS = {R.id.videoView1, R.id.videoView2, R.id.videoView3, R.id.videoView4};
+    private static final int[] VIDEO_INFO_IDS = {R.id.videoInfo1, R.id.videoInfo2, R.id.videoInfo3, R.id.videoInfo4};
+    private static final int[] VIDEO_TITLE_IDS = {R.id.videoTitle1, R.id.videoTitle2, R.id.videoTitle3, R.id.videoTitle4};
+    private static final int[] VIDEO_DETAILS_IDS = {R.id.videoDetails1, R.id.videoDetails2, R.id.videoDetails3, R.id.videoDetails4};
+    private static final int[] IMAGE_LOCATION_IDS = {R.id.imageLocation1, R.id.imageLocation2, R.id.imageLocation3, R.id.imageLocation4};
+    private static final int[] DEFAULT_SLOT_ORDER = {0, 1, 2, 3};
+
     class PicItem{
         PicItem(String path, int ori, String gpsStr, boolean isVideo, Uri contentUri, long durationMs){
             this.path = path;
@@ -119,6 +133,37 @@ public class FirstFragment extends Fragment {
         public int width;
         public int height;
         public String mimeType;
+    }
+
+    private static class MediaSlot {
+        final ImageView imageView;
+        final PlayerView playerView;
+        final View videoInfo;
+        final TextView videoTitle;
+        final TextView videoDetails;
+        final TextView imageLocation;
+
+        MediaSlot(ImageView imageView, PlayerView playerView, View videoInfo,
+                  TextView videoTitle, TextView videoDetails, TextView imageLocation) {
+            this.imageView = imageView;
+            this.playerView = playerView;
+            this.videoInfo = videoInfo;
+            this.videoTitle = videoTitle;
+            this.videoDetails = videoDetails;
+            this.imageLocation = imageLocation;
+        }
+    }
+
+    private static class LayoutPlan {
+        final int layoutRes;
+        final int[] slotOrder;
+        final List<PicItem> items;
+
+        LayoutPlan(int layoutRes, int[] slotOrder, List<PicItem> items) {
+            this.layoutRes = layoutRes;
+            this.slotOrder = slotOrder;
+            this.items = items;
+        }
     }
 
     @Override
@@ -344,23 +389,31 @@ public class FirstFragment extends Fragment {
                     clearSingleModeDisplay();
                 }
             } else {
-                ImageView[] imgViewList = {binding.imgview1, binding.imgview2, binding.imgview3, binding.imgview4};
-                PlayerView[] playerViewList = {binding.videoView1, binding.videoView2, binding.videoView3, binding.videoView4};
+                LayoutPlan layoutPlan = createLayoutPlan(imagelist);
+                if (layoutPlan == null || layoutPlan.items.isEmpty()) {
+                    hasMediaContent = false;
+                    scheduleNextRefresh();
+                    return;
+                }
+                View layout = ensureMultiLayout(layoutPlan.layoutRes);
+                if (layout == null) {
+                    hasMediaContent = false;
+                    return;
+                }
+                bindMediaSlots(layoutPlan);
                 int slotWidth = dm.first / GRID_COLUMNS;
                 int slotHeight = dm.second / GRID_ROWS;
-                for(int i=0; i<GRID_SLOT_COUNT; i++){
-                    ImageView imageView = imgViewList[i];
-                    PlayerView playerView = playerViewList[i];
-                    if (i < imagelist.size()) {
-                        PicItem item = imagelist.get(i);
-                        Log.i("getLocation path:", item.path);
+                for (int i = 0; i < currentMediaSlots.size(); i++) {
+                    MediaSlot slot = currentMediaSlots.get(i);
+                    if (i < layoutPlan.items.size()) {
+                        PicItem item = layoutPlan.items.get(i);
                         if (item.isVideo) {
-                            showVideo(item, imageView, playerView);
+                            showVideo(item, slot);
                         } else {
-                            showImage(item, imageView, playerView, slotWidth, slotHeight);
+                            showImage(item, slot.imageView, slot.playerView, slot.videoInfo, slot.imageLocation, slotWidth, slotHeight);
                         }
                     } else {
-                        hideMediaSlot(imageView, playerView);
+                        clearMediaSlot(slot);
                     }
                 }
                 hasMediaContent = true;
@@ -372,37 +425,15 @@ public class FirstFragment extends Fragment {
         scheduleNextRefresh();
     }
 
-    private void hideImageLocation(ImageView imageView) {
-        int viewId = imageView.getId();
-        if (viewId == binding.imgview1.getId()) {
-            binding.imageLocation1.setVisibility(View.GONE);
-        } else if (viewId == binding.imgview2.getId()) {
-            binding.imageLocation2.setVisibility(View.GONE);
-        } else if (viewId == binding.imgview3.getId()) {
-            binding.imageLocation3.setVisibility(View.GONE);
-        } else if (viewId == binding.imgview4.getId()) {
-            binding.imageLocation4.setVisibility(View.GONE);
+    private void showImage(PicItem item, ImageView imageView, PlayerView playerView, View videoInfo, TextView locationView, int imgWidth, int imgHeight) {
+        if (playerView != null) {
+            playerView.setPlayer(null);
+            playerView.setVisibility(View.GONE);
         }
-    }
-
-    private void hideVideoInfo(PlayerView playerView) {
-        int viewId = playerView.getId();
-        if (viewId == binding.videoView1.getId()) {
-            binding.videoInfo1.setVisibility(View.GONE);
-        } else if (viewId == binding.videoView2.getId()) {
-            binding.videoInfo2.setVisibility(View.GONE);
-        } else if (viewId == binding.videoView3.getId()) {
-            binding.videoInfo3.setVisibility(View.GONE);
-        } else if (viewId == binding.videoView4.getId()) {
-            binding.videoInfo4.setVisibility(View.GONE);
+        if (videoInfo != null) {
+            videoInfo.setVisibility(View.GONE);
         }
-    }
-
-    private void showImage(PicItem item, ImageView imageView, PlayerView playerView, int imgWidth, int imgHeight) {
-        playerView.setPlayer(null);
-        playerView.setVisibility(View.GONE);
         imageView.setVisibility(View.VISIBLE);
-        hideVideoInfo(playerView);
         Bitmap bmp = decodeScaledBitmap(item, imgWidth, imgHeight);
         if (bmp != null) {
             imageView.setImageBitmap(bmp);
@@ -410,20 +441,40 @@ public class FirstFragment extends Fragment {
             imageView.setImageDrawable(null);
         }
         // 显示位置信息
-        if (isNetworkAvailable()) {
-            showImageLocation(item, imageView);
-        } else {
-            Log.w("FirstFragment", "Network unavailable; skip image geocoding.");
+        if (locationView != null) {
+            if (isNetworkAvailable()) {
+                showImageLocation(item, locationView);
+            } else {
+                locationView.setVisibility(View.GONE);
+                Log.w("FirstFragment", "Network unavailable; skip image geocoding.");
+            }
         }
     }
 
-    private void hideMediaSlot(ImageView imageView, PlayerView playerView) {
-        imageView.setImageDrawable(null);
-        imageView.setVisibility(View.GONE);
-        playerView.setPlayer(null);
-        playerView.setVisibility(View.GONE);
-        hideVideoInfo(playerView);
-        hideImageLocation(imageView);
+    private void clearMediaSlot(MediaSlot slot) {
+        if (slot == null) {
+            return;
+        }
+        if (slot.imageView != null) {
+            slot.imageView.setImageDrawable(null);
+            slot.imageView.setVisibility(View.GONE);
+        }
+        if (slot.playerView != null) {
+            slot.playerView.setPlayer(null);
+            slot.playerView.setVisibility(View.GONE);
+        }
+        if (slot.videoInfo != null) {
+            slot.videoInfo.setVisibility(View.GONE);
+        }
+        if (slot.videoTitle != null) {
+            slot.videoTitle.setText("");
+        }
+        if (slot.videoDetails != null) {
+            slot.videoDetails.setText("");
+        }
+        if (slot.imageLocation != null) {
+            slot.imageLocation.setVisibility(View.GONE);
+        }
     }
 
     private void clearSingleModeDisplay() {
@@ -444,7 +495,9 @@ public class FirstFragment extends Fragment {
         }
         boolean singleMode = DISPLAY_MODE_SINGLE.equals(currentDisplayMode);
         binding.singleImageContainer.setVisibility(singleMode ? View.VISIBLE : View.GONE);
-        binding.mediaGrid.setVisibility(singleMode ? View.GONE : View.VISIBLE);
+        if (binding.multiMediaContainer != null) {
+            binding.multiMediaContainer.setVisibility(singleMode ? View.GONE : View.VISIBLE);
+        }
     }
 
     private void displaySingleModeItem(int screenWidth, int screenHeight) {
@@ -459,6 +512,183 @@ public class FirstFragment extends Fragment {
         } else {
             showImageInSingleMode(item, screenWidth, screenHeight);
         }
+    }
+
+    private View ensureMultiLayout(@LayoutRes int layoutRes) {
+        if (binding == null || binding.multiMediaContainer == null) {
+            return null;
+        }
+        if (currentMultiLayout != null && currentLayoutResId == layoutRes) {
+            return currentMultiLayout;
+        }
+        binding.multiMediaContainer.removeAllViews();
+        LayoutInflater inflater = LayoutInflater.from(binding.getRoot().getContext());
+        currentMultiLayout = inflater.inflate(layoutRes, binding.multiMediaContainer, false);
+        binding.multiMediaContainer.addView(currentMultiLayout);
+        currentLayoutResId = layoutRes;
+        currentMediaSlots.clear();
+        return currentMultiLayout;
+    }
+
+    private void bindMediaSlots(LayoutPlan layoutPlan) {
+        if (currentMultiLayout == null) {
+            currentMediaSlots.clear();
+            return;
+        }
+        currentMediaSlots.clear();
+        int[] slotOrder = layoutPlan.slotOrder != null ? layoutPlan.slotOrder : DEFAULT_SLOT_ORDER;
+        boolean[] used = new boolean[IMAGE_VIEW_IDS.length];
+        for (int index : slotOrder) {
+            appendSlot(index, used);
+        }
+        if (currentMediaSlots.isEmpty()) {
+            for (int index : DEFAULT_SLOT_ORDER) {
+                appendSlot(index, used);
+            }
+        }
+    }
+
+    private void appendSlot(int index, boolean[] used) {
+        if (index < 0 || index >= IMAGE_VIEW_IDS.length || used[index]) {
+            return;
+        }
+        if (currentMultiLayout == null) {
+            return;
+        }
+        ImageView imageView = currentMultiLayout.findViewById(IMAGE_VIEW_IDS[index]);
+        if (imageView == null) {
+            return;
+        }
+        PlayerView playerView = currentMultiLayout.findViewById(VIDEO_VIEW_IDS[index]);
+        View videoInfo = currentMultiLayout.findViewById(VIDEO_INFO_IDS[index]);
+        TextView videoTitle = currentMultiLayout.findViewById(VIDEO_TITLE_IDS[index]);
+        TextView videoDetails = currentMultiLayout.findViewById(VIDEO_DETAILS_IDS[index]);
+        TextView imageLocation = currentMultiLayout.findViewById(IMAGE_LOCATION_IDS[index]);
+        currentMediaSlots.add(new MediaSlot(imageView, playerView, videoInfo, videoTitle, videoDetails, imageLocation));
+        used[index] = true;
+    }
+
+    private LayoutPlan createLayoutPlan(List<PicItem> items) {
+        if (items == null || items.isEmpty()) {
+            return null;
+        }
+        List<PicItem> portraits = new ArrayList<>();
+        List<PicItem> landscapes = new ArrayList<>();
+        List<PicItem> shuffledAll = new ArrayList<>();
+        for (PicItem item : items) {
+            if (item == null) {
+                continue;
+            }
+            populateMediaMetadata(item);
+            if (isPortrait(item)) {
+                portraits.add(item);
+            } else {
+                landscapes.add(item);
+            }
+            shuffledAll.add(item);
+        }
+        if (shuffledAll.isEmpty()) {
+            return null;
+        }
+        Collections.shuffle(portraits, random);
+        Collections.shuffle(landscapes, random);
+        Collections.shuffle(shuffledAll, random);
+
+        if (portraits.size() >= 3) {
+            List<PicItem> selected = new ArrayList<>(portraits.subList(0, 3));
+            return new LayoutPlan(R.layout.layout_media_three_portrait, new int[]{0, 1, 2}, selected);
+        }
+
+        if (portraits.size() == 2 && landscapes.size() >= 2) {
+            List<PicItem> selected = new ArrayList<>();
+            selected.addAll(portraits.subList(0, 2));
+            selected.addAll(landscapes.subList(0, 2));
+            return new LayoutPlan(R.layout.layout_media_two_portrait, DEFAULT_SLOT_ORDER, selected);
+        }
+
+        if (portraits.size() >= 1 && landscapes.size() >= 2) {
+            List<PicItem> selected = new ArrayList<>();
+            selected.add(portraits.get(0));
+            selected.addAll(landscapes.subList(0, 2));
+            return new LayoutPlan(R.layout.layout_media_portrait_left, new int[]{0, 1, 2}, selected);
+        }
+
+        // Fallback：田字格布局，最多展示4张
+        List<PicItem> fallback = new ArrayList<>();
+        int limit = Math.min(shuffledAll.size(), GRID_SLOT_COUNT);
+        for (int i = 0; i < limit; i++) {
+            fallback.add(shuffledAll.get(i));
+        }
+        return new LayoutPlan(R.layout.layout_media_grid, DEFAULT_SLOT_ORDER, fallback);
+    }
+
+    private void populateMediaMetadata(PicItem item) {
+        if (item == null) {
+            return;
+        }
+        if (item.isVideo) {
+            if (item.width > 0 && item.height > 0 && item.mimeType != null) {
+                return;
+            }
+            MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+            try {
+                retriever.setDataSource(item.path);
+                String widthStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH);
+                String heightStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT);
+                if (!TextUtils.isEmpty(widthStr)) {
+                    item.width = Integer.parseInt(widthStr);
+                }
+                if (!TextUtils.isEmpty(heightStr)) {
+                    item.height = Integer.parseInt(heightStr);
+                }
+                if (item.durationMs <= 0) {
+                    String durationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
+                    if (!TextUtils.isEmpty(durationStr)) {
+                        item.durationMs = Long.parseLong(durationStr);
+                    }
+                }
+                if (item.mimeType == null) {
+                    item.mimeType = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_MIMETYPE);
+                }
+            } catch (Exception e) {
+                Log.w("FirstFragment", "Failed to load video metadata", e);
+            } finally {
+                try {
+                    retriever.release();
+                } catch (Exception ignored) {
+                }
+            }
+        } else {
+            if (item.width > 0 && item.height > 0 && item.mimeType != null) {
+                return;
+            }
+            BitmapFactory.Options options = new BitmapFactory.Options();
+            options.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(item.path, options);
+            if (options.outWidth > 0 && options.outHeight > 0) {
+                if(item.orientation<=4){
+                    item.width = options.outWidth;
+                    item.height = options.outHeight;
+                }else{
+                    item.width = options.outHeight;
+                    item.height = options.outWidth;
+                }
+            }
+            if (item.mimeType == null) {
+                item.mimeType = options.outMimeType;
+            }
+        }
+    }
+
+    private boolean isPortrait(PicItem item) {
+        if (item == null) {
+            return false;
+        }
+        if (item.width > 0 && item.height > 0) {
+            return item.height >= item.width;
+        }
+        // 当缺失尺寸信息时，保守地视为横图以回退到田字格
+        return false;
     }
 
     private void showImageInSingleMode(PicItem item, int screenWidth, int screenHeight) {
@@ -591,10 +821,16 @@ public class FirstFragment extends Fragment {
         binding.singleVideoInfo.setVisibility(View.VISIBLE);
     }
 
-    private void showVideo(PicItem item, ImageView imageView, PlayerView playerView) {
-        imageView.setImageDrawable(null);
-        imageView.setVisibility(View.GONE);
-        playerView.setVisibility(View.VISIBLE);
+    private void showVideo(PicItem item, MediaSlot slot) {
+        if (slot == null || slot.playerView == null) {
+            Log.w("FirstFragment", "Missing player view for video slot");
+            return;
+        }
+        if (slot.imageView != null) {
+            slot.imageView.setImageDrawable(null);
+            slot.imageView.setVisibility(View.GONE);
+        }
+        slot.playerView.setVisibility(View.VISIBLE);
 
         // API 29+ HDR 支持：设置窗口为 HDR 模式（仅当设备支持 HDR 时）
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && isHdrSupported()) {
@@ -635,12 +871,12 @@ public class FirstFragment extends Fragment {
                     if (duration != C.TIME_UNSET) {
                         extendRefreshIfNeeded(duration);
                     }
-                    updateVideoInfo(playerView, item, player);
+                    updateVideoInfo(slot, item, player);
 
                     // 延迟一点时间再次更新码率信息，因为有些信息可能需要时间加载
                     handler.postDelayed(() -> {
-                        if (playerView.getPlayer() == player) { // 确保播放器还没变
-                            updateVideoInfo(playerView, item, player);
+                        if (slot.playerView != null && slot.playerView.getPlayer() == player) {
+                            updateVideoInfo(slot, item, player);
                         }
                     }, 2000);
                 }
@@ -648,7 +884,7 @@ public class FirstFragment extends Fragment {
 
             @Override
             public void onTracksChanged(com.google.android.exoplayer2.Tracks tracks) {
-                updateVideoInfo(playerView, item, player);
+                updateVideoInfo(slot, item, player);
             }
         });
         player.prepare();
@@ -657,7 +893,7 @@ public class FirstFragment extends Fragment {
             extendRefreshIfNeeded(immediateDuration);
         }
         player.play();
-        playerView.setPlayer(player);
+        slot.playerView.setPlayer(player);
         activePlayers.add(player);
 
         // 显示位置信息
@@ -668,7 +904,10 @@ public class FirstFragment extends Fragment {
 //        }
     }
 
-    private void updateVideoInfo(PlayerView playerView, PicItem item, ExoPlayer player) {
+    private void updateVideoInfo(MediaSlot slot, PicItem item, ExoPlayer player) {
+        if (slot == null || slot.videoTitle == null || slot.videoDetails == null || slot.videoInfo == null) {
+            return;
+        }
         String fileName = new java.io.File(item.path).getName();
 
         StringBuilder detailText = new StringBuilder();
@@ -697,9 +936,6 @@ public class FirstFragment extends Fragment {
                                 // 尝试多种方式获取码率
                                 String bitrate = getVideoBitrate(format, item, player);
 
-                                // 获取文件大小
-                                String fileSize = getFileSize(item.path);
-
                                 detailText.append(String.format("Res: %s %s | Codec: %s | Bitrate: %s",
                                         resolution, fps, codec, bitrate));
                             }
@@ -716,25 +952,9 @@ public class FirstFragment extends Fragment {
         if (detailText.length() == 0) {
             detailText.append("Loading video info...");
         }
-
-        int viewId = playerView.getId();
-        if (viewId == binding.videoView1.getId()) {
-            binding.videoTitle1.setText(fileName + " - ");
-            binding.videoDetails1.setText(detailText.toString());
-            binding.videoInfo1.setVisibility(View.VISIBLE);
-        } else if (viewId == binding.videoView2.getId()) {
-            binding.videoTitle2.setText(fileName + " - ");
-            binding.videoDetails2.setText(detailText.toString());
-            binding.videoInfo2.setVisibility(View.VISIBLE);
-        } else if (viewId == binding.videoView3.getId()) {
-            binding.videoTitle3.setText(fileName + " - ");
-            binding.videoDetails3.setText(detailText.toString());
-            binding.videoInfo3.setVisibility(View.VISIBLE);
-        } else if (viewId == binding.videoView4.getId()) {
-            binding.videoTitle4.setText(fileName + " - ");
-            binding.videoDetails4.setText(detailText.toString());
-            binding.videoInfo4.setVisibility(View.VISIBLE);
-        }
+        slot.videoTitle.setText(fileName + " - ");
+        slot.videoDetails.setText(detailText.toString());
+        slot.videoInfo.setVisibility(View.VISIBLE);
     }
 
     private String getVideoBitrate(Format format, PicItem item, ExoPlayer player) {
@@ -828,29 +1048,16 @@ public class FirstFragment extends Fragment {
         }
     }
 
-    private void showImageLocation(PicItem item, ImageView imageView) {
-        int viewId = imageView.getId();
-        TextView locationView = null;
-
-        if (viewId == binding.imgview1.getId()) {
-            locationView = binding.imageLocation1;
-        } else if (viewId == binding.imgview2.getId()) {
-            locationView = binding.imageLocation2;
-        } else if (viewId == binding.imgview3.getId()) {
-            locationView = binding.imageLocation3;
-        } else if (viewId == binding.imgview4.getId()) {
-            locationView = binding.imageLocation4;
+    private void showImageLocation(PicItem item, TextView locationView) {
+        if (locationView == null) {
+            return;
         }
-
-        if (!TextUtils.isEmpty(item.gpsLocation)) {
-            locationView.setVisibility(View.VISIBLE);
-
-            if (locationView != null && isNetworkAvailable()) {
-                getLocation(item.gpsLocation, locationView);
-            }
-        }else{
+        if (TextUtils.isEmpty(item.gpsLocation)) {
             locationView.setVisibility(View.GONE);
+            return;
         }
+        locationView.setVisibility(View.VISIBLE);
+        getLocation(item.gpsLocation, locationView);
     }
 
     private boolean isHdrSupported() {
@@ -882,11 +1089,12 @@ public class FirstFragment extends Fragment {
         }
         activePlayers.clear();
         if (binding != null) {
-            binding.videoView1.setPlayer(null);
-            binding.videoView2.setPlayer(null);
-            binding.videoView3.setPlayer(null);
-            binding.videoView4.setPlayer(null);
             binding.singleVideoView.setPlayer(null);
+        }
+        for (MediaSlot slot : currentMediaSlots) {
+            if (slot != null && slot.playerView != null) {
+                slot.playerView.setPlayer(null);
+            }
         }
         System.gc();
     }
@@ -980,23 +1188,48 @@ public class FirstFragment extends Fragment {
 
     private Bitmap decodeScaledBitmap(PicItem picItem, int imgWidth, int imgHeight){
         Bitmap bitmap = ImageUtils.LoadBitmap(picItem.path, imgWidth, imgHeight);
-        if(picItem.orientation == 1){
-            return bitmap;
-        }else if(picItem.orientation == 3){ //180 degree
-            int width = bitmap.getWidth();
-            int height = bitmap.getHeight();
-            Matrix matrix = new Matrix();
-            matrix.preRotate(180);
-            return Bitmap.createBitmap(bitmap, 0, 0, width, height, matrix, true);
-        }else if(picItem.orientation == 4){
-            int width = bitmap.getWidth();
-            int height = bitmap.getHeight();
-            Matrix matrix = new Matrix();
-            matrix.preRotate(180);
-            matrix.postScale(-1f, 1f);
-            return Bitmap.createBitmap(bitmap, 0, 0, width, height, matrix, true);
+        if(bitmap == null){
+            return null;
         }
-        return bitmap;
+
+        int orientation = picItem.orientation;
+        if(orientation == ExifInterface.ORIENTATION_UNDEFINED || orientation == ExifInterface.ORIENTATION_NORMAL){
+            return bitmap;
+        }
+
+        int width = bitmap.getWidth();
+        int height = bitmap.getHeight();
+        Matrix matrix = new Matrix();
+
+        switch (orientation){
+            case ExifInterface.ORIENTATION_FLIP_HORIZONTAL:
+                matrix.setScale(-1f, 1f);
+                break;
+            case ExifInterface.ORIENTATION_ROTATE_180:
+                matrix.setRotate(180f);
+                break;
+            case ExifInterface.ORIENTATION_FLIP_VERTICAL:
+                matrix.setScale(1f, -1f);
+                break;
+            case ExifInterface.ORIENTATION_TRANSPOSE:
+                matrix.setRotate(90f);
+                matrix.postScale(-1f, 1f);
+                break;
+            case ExifInterface.ORIENTATION_ROTATE_90:
+                matrix.setRotate(90f);
+                break;
+            case ExifInterface.ORIENTATION_TRANSVERSE:
+                matrix.setRotate(-90f);
+                matrix.postScale(-1f, 1f);
+                break;
+            case ExifInterface.ORIENTATION_ROTATE_270:
+                matrix.setRotate(-90f);
+                break;
+            default:
+                return bitmap;
+        }
+
+        return Bitmap.createBitmap(bitmap, 0, 0, width, height, matrix, true);
     }
 
 
@@ -1026,13 +1259,14 @@ public class FirstFragment extends Fragment {
         if(exifInterface != null){
             oriValue = exifInterface.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
             Log.i("[isLandScape]", imagePath + " " + oriValue);
+            return oriValue;
         }
 
-        if( oriValue > 0 && opt.outWidth > opt.outHeight){
-            return (oriValue >= 1 && oriValue <= 4)? oriValue: -1;
-        }else if(oriValue > 0 && opt.outWidth < opt.outHeight){
-            return (oriValue >= 5 && oriValue <= 8)? oriValue: -1;
-        }
+//        if( oriValue > 0 && opt.outWidth > opt.outHeight){
+//            return (oriValue >= 1 && oriValue <= 4)? oriValue: -1;
+//        }else if(oriValue > 0 && opt.outWidth < opt.outHeight){
+//            return (oriValue >= 5 && oriValue <= 8)? oriValue: -1;
+//        }
         return 0;
     }
     private String getGpsLocation(String imagePath){
@@ -1143,7 +1377,7 @@ public class FirstFragment extends Fragment {
                     } else if (mediaType == MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE) {
                         int oriVal = landScapeValue(filePath);
                         String gpsLocation = getGpsLocation(filePath);
-                        if(oriVal >= 0 && imglist.size() < desiredCount && !listContains(imglist,filePath)){
+                        if(imglist.size() < desiredCount && !listContains(imglist,filePath)){
                             Uri uri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, itemId);
                             imglist.add(new PicItem(filePath, oriVal, gpsLocation, false, uri, CHANGE_TIMER));
                         }
