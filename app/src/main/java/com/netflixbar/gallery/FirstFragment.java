@@ -570,9 +570,9 @@ public class FirstFragment extends Fragment {
                                 String resolution = format.width + "x" + format.height;
                                 String codec = format.sampleMimeType != null ? format.sampleMimeType : "Unknown";
                                 String fps = format.frameRate != Format.NO_VALUE ?
-                                        String.format("%.0f fps", format.frameRate) : "Unknown";
+                                        String.format("%.0fp", format.frameRate) : "Unknown";
                                 String bitrate = getVideoBitrate(format, item, player);
-                                detailText.append(String.format("Res: %s %sp | Codec: %s | Bitrate: %s",
+                                detailText.append(String.format("Res: %s %s | Codec: %s | Bitrate: %s",
                                         resolution, fps, codec, bitrate));
                             }
                         }
@@ -692,7 +692,7 @@ public class FirstFragment extends Fragment {
                                 String resolution = format.width + "x" + format.height;
                                 String codec = format.sampleMimeType != null ? format.sampleMimeType : "Unknown";
                                 String fps = format.frameRate != Format.NO_VALUE ?
-                                        String.format("%.0f fps", format.frameRate) : "Unknown";
+                                        String.format("%.0fp", format.frameRate) : "Unknown";
 
                                 // 尝试多种方式获取码率
                                 String bitrate = getVideoBitrate(format, item, player);
