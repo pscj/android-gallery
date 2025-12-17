@@ -1,12 +1,16 @@
 package com.netflixbar.gallery;
 
 import android.Manifest;
+import android.content.BroadcastReceiver;
 import android.content.ContentResolver;
 import android.content.ContentUris;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.ActivityInfo;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.os.Environment;
 import android.hardware.display.DisplayManager;
 import android.media.MediaScannerConnection;
 import android.net.ConnectivityManager;
@@ -108,6 +112,10 @@ public class FirstFragment extends Fragment {
     private boolean refreshScheduled = false;
     private final Runnable refreshRunnable = this::loadImage;
     private static final int[] IMAGE_VIEW_IDS = {R.id.imgview1, R.id.imgview2, R.id.imgview3, R.id.imgview4};
+    private static final int MAX_RETRY_COUNT = 5;
+    private static final long RETRY_DELAY_MS = 2000;
+    private int loadRetryCount = 0;
+    private BroadcastReceiver storageReceiver;
     private static final int[] VIDEO_VIEW_IDS = {R.id.videoView1, R.id.videoView2, R.id.videoView3, R.id.videoView4};
     private static final int[] VIDEO_INFO_IDS = {R.id.videoInfo1, R.id.videoInfo2, R.id.videoInfo3, R.id.videoInfo4};
     private static final int[] VIDEO_TITLE_IDS = {R.id.videoTitle1, R.id.videoTitle2, R.id.videoTitle3, R.id.videoTitle4};
@@ -171,7 +179,7 @@ public class FirstFragment extends Fragment {
         super.onCreate(savedInstanceState);
         storagePermissionLauncher = registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), result -> {
             if (hasImagePermission()) {
-                loadImage();
+                loadImageWithRetry();
             } else {
                 Log.w("FirstFragment", "Required image permission denied; cannot load media.");
             }
@@ -239,9 +247,12 @@ public class FirstFragment extends Fragment {
         // Set touch listener on root view
         view.setOnTouchListener((v, event) -> gestureDetector.onTouchEvent(event));
 
+        // 注册存储状态监听器
+        registerStorageReceiver();
+
         scanExternalStorageMedia();
         if (hasImagePermission()) {
-            loadImage();
+            loadImageWithRetry();
         } else {
             requestStoragePermission();
         }
@@ -296,8 +307,82 @@ public class FirstFragment extends Fragment {
         handler.removeCallbacksAndMessages(null);
         hasMediaContent = false;
         releasePlayers();
+        unregisterStorageReceiver();
         super.onDestroyView();
         binding = null;
+    }
+
+    private void registerStorageReceiver() {
+        if (storageReceiver != null) {
+            return;
+        }
+        storageReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                String action = intent.getAction();
+                Log.i("FirstFragment", "Storage broadcast received: " + action);
+                
+                if (Intent.ACTION_MEDIA_MOUNTED.equals(action) || 
+                    Intent.ACTION_MEDIA_SCANNER_FINISHED.equals(action)) {
+                    // SD卡挂载完成或媒体扫描完成，重新加载图片
+                    Log.i("FirstFragment", "Storage ready, reloading media...");
+                    loadRetryCount = 0;
+                    handler.postDelayed(() -> {
+                        if (hasImagePermission()) {
+                            loadImageWithRetry();
+                        }
+                    }, 500);
+                }
+            }
+        };
+        
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(Intent.ACTION_MEDIA_MOUNTED);
+        filter.addAction(Intent.ACTION_MEDIA_SCANNER_FINISHED);
+        filter.addDataScheme("file");
+        
+        try {
+            requireContext().registerReceiver(storageReceiver, filter);
+            Log.i("FirstFragment", "Storage receiver registered");
+        } catch (Exception e) {
+            Log.e("FirstFragment", "Failed to register storage receiver", e);
+        }
+    }
+
+    private void unregisterStorageReceiver() {
+        if (storageReceiver != null) {
+            try {
+                requireContext().unregisterReceiver(storageReceiver);
+                Log.i("FirstFragment", "Storage receiver unregistered");
+            } catch (Exception e) {
+                Log.e("FirstFragment", "Failed to unregister storage receiver", e);
+            }
+            storageReceiver = null;
+        }
+    }
+
+    private void loadImageWithRetry() {
+        if (!isAdded() || binding == null) {
+            return;
+        }
+        
+        // 检查存储状态
+        String state = Environment.getExternalStorageState();
+        if (!Environment.MEDIA_MOUNTED.equals(state)) {
+            Log.w("FirstFragment", "External storage not mounted, state: " + state);
+            if (loadRetryCount < MAX_RETRY_COUNT) {
+                loadRetryCount++;
+                Log.i("FirstFragment", "Retry loading media in " + RETRY_DELAY_MS + "ms (attempt " + loadRetryCount + "/" + MAX_RETRY_COUNT + ")");
+                handler.postDelayed(this::loadImageWithRetry, RETRY_DELAY_MS);
+            } else {
+                Log.e("FirstFragment", "Max retry count reached, giving up");
+                loadRetryCount = 0;
+            }
+            return;
+        }
+        
+        loadRetryCount = 0;
+        loadImage();
     }
 
     private int getRandNum(int endNum){
@@ -354,8 +439,18 @@ public class FirstFragment extends Fragment {
 
             int pageCount = (int) Math.ceil(totalCount / (double) PAGE_SIZE);
             if(pageCount <=0 ) {
+                Log.w("FirstFragment", "No media found in MediaStore, totalCount: " + totalCount);
                 hasMediaContent = false;
-                scheduleNextRefresh();
+                // 如果没有找到媒体文件，可能是SD卡还在加载，尝试重试
+                if (loadRetryCount < MAX_RETRY_COUNT) {
+                    loadRetryCount++;
+                    Log.i("FirstFragment", "No media found, retrying in " + RETRY_DELAY_MS + "ms (attempt " + loadRetryCount + "/" + MAX_RETRY_COUNT + ")");
+                    handler.postDelayed(this::loadImageWithRetry, RETRY_DELAY_MS);
+                } else {
+                    Log.w("FirstFragment", "Max retry reached, no media available");
+                    loadRetryCount = 0;
+                    scheduleNextRefresh();
+                }
                 return;
             }
 
@@ -440,6 +535,8 @@ public class FirstFragment extends Fragment {
         } else {
             imageView.setImageDrawable(null);
         }
+        // 根据图片宽高比调整容器宽度
+        adjustFrameLayoutRatio(imageView, item);
         // 显示位置信息
         if (locationView != null) {
             if (isNetworkAvailable()) {
@@ -447,6 +544,26 @@ public class FirstFragment extends Fragment {
             } else {
                 locationView.setVisibility(View.GONE);
                 Log.w("FirstFragment", "Network unavailable; skip image geocoding.");
+            }
+        }
+    }
+
+    private void adjustFrameLayoutRatio(ImageView imageView, PicItem item) {
+        if (imageView == null || item == null || item.width <= 0 || item.height <= 0) {
+            return;
+        }
+        ViewGroup parent = (ViewGroup) imageView.getParent();
+        if (parent == null) {
+            return;
+        }
+        if (parent instanceof androidx.constraintlayout.widget.ConstraintLayout) {
+            androidx.constraintlayout.widget.ConstraintLayout.LayoutParams lp = 
+                (androidx.constraintlayout.widget.ConstraintLayout.LayoutParams) parent.getLayoutParams();
+            if (lp != null) {
+                lp.dimensionRatio = item.width + ":" + item.height;
+                lp.matchConstraintDefaultWidth = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.MATCH_CONSTRAINT_SPREAD;
+                parent.setLayoutParams(lp);
+                parent.requestLayout();
             }
         }
     }
