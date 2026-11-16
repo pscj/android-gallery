@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>图库设置</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f2f5fa; color: #1e293b; font: 16px/1.6 system-ui, sans-serif; }
+    main { max-width: 580px; margin: 6vh auto; padding: 28px; }
+    .card { background: white; padding: 28px; border-radius: 20px; box-shadow: 0 12px 40px #2030500c; }
+    h1 { font-size: 28px; margin: 0 0 8px; }
+    p { color: #64748b; margin-top: 0; }
+    label { display: block; font-weight: 600; margin: 22px 0 8px; }
+    input, select, button { font: inherit; width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #cbd5e1; }
+    input:focus, select:focus, button:focus-visible { outline: 3px solid #93c5fd; outline-offset: 2px; }
+    button { margin-top: 16px; cursor: pointer; background: #2563eb; border-color: #2563eb; color: white; font-weight: 600; }
+    button:disabled { opacity: .55; cursor: wait; }
+    fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+    #status { margin-top: 20px; overflow-wrap: anywhere; }
+    .hint { font-size: 13px; margin-top: 22px; }
+    .upload-section { margin-top: 28px; padding-top: 24px; border-top: 1px solid #e2e8f0; }
+    h2 { font-size: 21px; margin: 0 0 8px; }
+    .upload-path { overflow-wrap: anywhere; font-size: 14px; }
+    .upload-list { list-style: none; padding: 0; max-height: 360px; overflow-y: auto; }
+    .upload-list li { padding: 12px 0; border-bottom: 1px solid #e2e8f0; }
+    .upload-name, .upload-detail { display: block; overflow-wrap: anywhere; }
+    .upload-detail { font-size: 13px; color: #64748b; }
+    progress { width: 100%; height: 8px; }
+    .secondary { color: #2563eb; background: white; }
+    [hidden] { display: none !important; }
+    @media (max-width: 480px) { main { margin: 20px auto; padding: 16px; } .card { padding: 22px; } }
+  </style>
+</head>
+<body>
+<main>
+  <div class="card">
+    <h1>图库设置</h1>
+    <p>调整屏幕上的图片轮播方式</p>
+    <form id="settings">
+      <fieldset id="controls">
+        <label for="interval">图片更换时间</label>
+        <select id="interval" required></select>
+        <label for="mode">显示模式</label>
+        <select id="mode"><option value="grid">四分屏</option><option value="single">单图模式</option></select>
+        <button type="submit">保存设置</button>
+      </fieldset>
+    </form>
+    <div id="status" role="status" aria-live="polite">正在读取设备设置…</div>
+    <section class="upload-section" aria-labelledby="upload-title">
+      <h2 id="upload-title">上传图片</h2>
+      <p id="upload-directory" class="upload-path">正在检查存储卡…</p>
+      <label for="upload-files">选择图片（可多选）</label>
+      <input id="upload-files" type="file" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.bmp">
+      <div id="folder-picker">
+        <label for="upload-folder">选择文件夹（包含子文件夹）</label>
+        <input id="upload-folder" type="file" webkitdirectory multiple>
+      </div>
+      <p class="hint">支持 JPEG、PNG、WebP、GIF 和 BMP，单张不超过 50 MiB。文件夹内的其他文件会跳过。同名图片另存，上传后自动加入相册。</p>
+      <button id="upload-start" type="button" disabled>开始上传</button>
+      <button id="upload-retry" class="secondary" type="button" hidden>重试失败项</button>
+      <div id="upload-status" role="status" aria-live="polite">请选择图片或文件夹</div>
+      <ul id="upload-list" class="upload-list" aria-label="上传文件列表"></ul>
+    </section>
+    <p class="hint">请保持设备上的图库应用运行，并连接同一局域网。连接失败时，请在设备设置页查看最新网址。</p>
+  </div>
+</main>
+<script>
+  'use strict';
+  const form = document.getElementById('settings');
+  const controls = document.getElementById('controls');
+  const status = document.getElementById('status');
+  const interval = document.getElementById('interval');
+  const mode = document.getElementById('mode');
+  let busy = false;
+
+  async function request(values) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 7000);
+    try {
+      const response = await fetch('/api/settings', {
+        method: values ? 'POST' : 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        body: values ? JSON.stringify(values) : undefined,
+        cache: 'no-store', signal: controller.signal
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || '请求失败，请重试');
+      return data;
+    } catch (error) {
+      if (error.name === 'AbortError' || error instanceof TypeError) {
+        throw new Error('无法连接设备。保存结果未确认，请检查网络和设备网址，重新连接并读取设置。');
+      }
+      throw error;
+    } finally { clearTimeout(timeout); }
+  }
+
+  function render(data) {
+    interval.replaceChildren();
+    data.intervals.forEach(item => interval.add(new Option(item.label, String(item.value))));
+    interval.value = String(data.interval);
+    mode.value = data.displayMode;
+  }
+
+  async function run(action, message) {
+    if (busy) return;
+    busy = true; controls.disabled = true;
+    status.textContent = '正在连接设备…';
+    try { render(await action()); status.textContent = message; }
+    catch (error) { status.textContent = error.message; }
+    finally { busy = false; controls.disabled = false; }
+  }
+
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    const values = { interval: Number(interval.value), displayMode: mode.value };
+    run(() => request(values), '设置已保存，设备将按新设置播放');
+  });
+  run(() => request(), '已读取设备当前设置');
+
+  const filePicker = document.getElementById('upload-files');
+  const folderPicker = document.getElementById('upload-folder');
+  const uploadStart = document.getElementById('upload-start');
+  const uploadRetry = document.getElementById('upload-retry');
+  const uploadStatus = document.getElementById('upload-status');
+  const uploadList = document.getElementById('upload-list');
+  const destination = document.getElementById('upload-directory');
+  const queue = [];
+  const maxUploadBytes = 50 * 1024 * 1024;
+  let uploading = false;
+  let storageReady = false;
+
+  if (!('webkitdirectory' in folderPicker)) document.getElementById('folder-picker').hidden = true;
+
+  async function checkStorage() {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 7000);
+    try {
+      const response = await fetch('/api/uploads', {cache: 'no-store', signal: controller.signal});
+      const data = await response.json();
+      if (!response.ok || !data.available) throw new Error(data.error || '存储卡暂时不可用');
+      storageReady = true;
+      destination.textContent = '保存到：' + data.directory;
+      return true;
+    } catch (error) {
+      storageReady = false;
+      destination.textContent = '无法上传：' + (error.name === 'AbortError' || error instanceof TypeError ? '无法连接设备，请检查网络后刷新页面' : error.message);
+      return false;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  function updateUploadButtons() {
+    filePicker.disabled = uploading;
+    folderPicker.disabled = uploading;
+    uploadStart.disabled = uploading || !queue.some(item => item.state === 'pending');
+    uploadRetry.hidden = !queue.some(item => item.state === 'failed');
+    uploadRetry.disabled = uploading;
+  }
+
+  function addFiles(files) {
+    let skipped = 0;
+    for (const file of Array.from(files)) {
+      if (!/\.(jpe?g|png|webp|gif|bmp)$/i.test(file.name)) { skipped++; continue; }
+      const row = document.createElement('li');
+      const name = document.createElement('span');
+      name.className = 'upload-name';
+      name.textContent = file.webkitRelativePath || file.name;
+      const progress = document.createElement('progress');
+      progress.max = 100; progress.value = 0;
+      progress.setAttribute('aria-label', file.name + ' 上传进度');
+      const detail = document.createElement('span'); detail.className = 'upload-detail';
+      const invalidSize = file.size <= 0 || file.size > maxUploadBytes;
+      detail.textContent = invalidSize ? '文件大小必须大于 0 且不超过 50 MiB' : '等待上传 · ' + (file.size / 1024 / 1024).toFixed(2) + ' MiB';
+      row.append(name, progress, detail); uploadList.append(row);
+      queue.push({file, progress, detail, state: invalidSize ? 'invalid' : 'pending'});
+    }
+    uploadStatus.textContent = '已选择 ' + queue.length + ' 张图片' + (skipped ? '，已跳过 ' + skipped + ' 个其他文件' : '');
+    updateUploadButtons();
+  }
+
+  filePicker.addEventListener('change', () => { addFiles(filePicker.files); filePicker.value = ''; });
+  folderPicker.addEventListener('change', () => { addFiles(folderPicker.files); folderPicker.value = ''; });
+
+  function sendFile(item) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/uploads');
+      xhr.timeout = 10 * 60 * 1000;
+      xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+      xhr.setRequestHeader('X-File-Name', encodeURIComponent(item.file.name));
+      xhr.upload.onprogress = event => {
+        if (event.lengthComputable) {
+          const percent = Math.round(event.loaded * 100 / event.total);
+          item.progress.value = percent;
+          item.detail.textContent = percent === 100 ? '正在校验并加入相册…' : '正在上传 ' + percent + '%';
+        }
+      };
+      xhr.onload = () => {
+        let data;
+        try { data = JSON.parse(xhr.responseText); } catch { reject(new Error('设备返回异常，请检查后重试')); return; }
+        if (xhr.status !== 200 || !data.indexed) reject(new Error(data.error || '上传失败，请重试'));
+        else resolve(data);
+      };
+      xhr.onerror = () => reject(new Error('连接中断，上传结果未确认，请检查设备后再重试'));
+      xhr.ontimeout = () => reject(new Error('上传超时，结果未确认，请检查设备后再重试'));
+      xhr.send(item.file);
+    });
+  }
+
+  async function uploadQueue(retry) {
+    if (uploading) return;
+    uploading = true; updateUploadButtons();
+    try {
+      if (!(await checkStorage())) { uploadStatus.textContent = '存储卡不可用，请检查后重新点击上传'; return; }
+      const selected = queue.filter(item => item.state === (retry ? 'failed' : 'pending'));
+      for (let index = 0; index < selected.length; index++) {
+        const item = selected[index];
+        item.state = 'uploading'; item.progress.value = 0;
+        uploadStatus.textContent = '正在上传 ' + (index + 1) + ' / ' + selected.length;
+        try {
+          const result = await sendFile(item);
+          item.state = 'done'; item.progress.value = 100;
+          item.detail.textContent = '已保存并加入相册：' + result.path;
+        } catch (error) {
+          item.state = 'failed'; item.detail.textContent = error.message;
+        }
+      }
+      uploadStatus.textContent = '已完成 ' + queue.filter(item => item.state === 'done').length + ' 张，失败 '
+          + queue.filter(item => item.state === 'failed').length + ' 张，无效 '
+          + queue.filter(item => item.state === 'invalid').length + ' 张';
+    } finally {
+      uploading = false; updateUploadButtons();
+    }
+  }
+
+  uploadStart.addEventListener('click', () => uploadQueue(false));
+  uploadRetry.addEventListener('click', () => uploadQueue(true));
+  checkStorage();
+</script>
+</body>
+</html>

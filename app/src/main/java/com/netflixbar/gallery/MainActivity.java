@@ -26,10 +26,13 @@ public class MainActivity extends AppCompatActivity {
 
     private AppBarConfiguration appBarConfiguration;
     private ActivityMainBinding binding;
+    private WebSettingsController webSettings;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        webSettings = new WebSettingsController(this);
+        webSettings.enable();
 
         CrashReport.initCrashReport(getApplicationContext(), "06978774c6", false);
 
@@ -46,6 +49,16 @@ public class MainActivity extends AppCompatActivity {
         appBarConfiguration = new AppBarConfiguration.Builder(navController.getGraph()).build();
         NavigationUI.setupActionBarWithNavController(this, navController, appBarConfiguration);
 
+    }
+
+    public WebSettingsController getWebSettings() {
+        return webSettings;
+    }
+
+    @Override
+    protected void onDestroy() {
+        webSettings.disable();
+        super.onDestroy();
     }
 
     @Override

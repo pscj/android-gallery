@@ -14,4 +14,5 @@
 
     <string name="hello_first_fragment">Hello first fragment</string>
     <string name="hello_second_fragment">Hello second fragment. Arg: %1$s</string>
+    <string name="web_settings_enable">开启局域网网页设置（立即生效）</string>
 </resources>

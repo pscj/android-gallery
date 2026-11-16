@@ -86,7 +86,7 @@ public class FirstFragment extends Fragment {
     private static final int GRID_SLOT_COUNT = GRID_COLUMNS * GRID_ROWS;
     private static final int SINGLE_MODE_CACHE_COUNT = 12;
     private int PAGE_SIZE = 1;
-    private long CHANGE_TIMER = 1000 * 60 * 10;
+    private long CHANGE_TIMER = GallerySettings.DEFAULT_INTERVAL;
     private static final int VIDEO_BUFFER_MS = 3000;
     private static final int VIDEO_BACKBUFFER_MS = 1000;
     private Handler handler = new Handler();
@@ -94,11 +94,17 @@ public class FirstFragment extends Fragment {
     private final List<ExoPlayer> activePlayers = new ArrayList<>();
     private Gson gson = new Gson();
     private SettingsDialog settingsDialog;
-    private static final String PREFS_NAME = "gallery_settings";
-    private static final String KEY_CHANGE_INTERVAL = "change_interval";
-    private static final String KEY_DISPLAY_MODE = "display_mode";
-    private static final String DISPLAY_MODE_GRID = "grid";
-    private static final String DISPLAY_MODE_SINGLE = "single";
+    private GallerySettings gallerySettings;
+    private final Runnable uploadRefreshRunnable = this::refreshUploadedMedia;
+    private final Runnable applySettingsRunnable = this::applySavedSettings;
+    private final SharedPreferences.OnSharedPreferenceChangeListener settingsListener = (preferences, key) -> {
+        if (GallerySettings.KEY_INTERVAL.equals(key) || GallerySettings.KEY_MODE.equals(key)) {
+            handler.removeCallbacks(applySettingsRunnable);
+            handler.post(applySettingsRunnable);
+        }
+    };
+    private static final String DISPLAY_MODE_GRID = GallerySettings.GRID;
+    private static final String DISPLAY_MODE_SINGLE = GallerySettings.SINGLE;
     private GestureDetector gestureDetector;
     private boolean hasMediaContent = false;
     private String currentDisplayMode = DISPLAY_MODE_GRID;
@@ -231,6 +237,12 @@ public class FirstFragment extends Fragment {
     public void onViewCreated(@NonNull View view, Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
         
+        gallerySettings = new GallerySettings(requireContext());
+        gallerySettings.register(settingsListener);
+        ((MainActivity) requireActivity()).getWebSettings().setMediaListener(() -> {
+            handler.removeCallbacks(uploadRefreshRunnable);
+            handler.postDelayed(uploadRefreshRunnable, 500);
+        });
         // Load saved interval from preferences
         loadChangeInterval();
         loadDisplayMode();
@@ -304,6 +316,9 @@ public class FirstFragment extends Fragment {
 
     @Override
     public void onDestroyView() {
+        ((MainActivity) requireActivity()).getWebSettings().setMediaListener(null);
+        if (gallerySettings != null) gallerySettings.unregister(settingsListener);
+        if (settingsDialog != null) settingsDialog.dismiss();
         handler.removeCallbacksAndMessages(null);
         hasMediaContent = false;
         releasePlayers();
@@ -427,6 +442,7 @@ public class FirstFragment extends Fragment {
         } else {
             selection = MediaStore.Files.FileColumns.MEDIA_TYPE + "=" + MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE;
         }
+        if (Build.VERSION.SDK_INT >= 29) selection = "(" + selection + ") AND is_pending=0";
         Cursor cursor = null;
         try {
             cursor = cr.query(getMediaStoreUri(), new String[]{MediaStore.Files.FileColumns._ID}, selection, null, MediaStore.Files.FileColumns.DATE_ADDED + " DESC");
@@ -1460,6 +1476,7 @@ public class FirstFragment extends Fragment {
             selection = MediaStore.Files.FileColumns.MEDIA_TYPE + "=" + MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE;
         }
 
+        if (Build.VERSION.SDK_INT >= 29) selection = "(" + selection + ") AND is_pending=0";
         Cursor cursor = null;
         try {
             cursor = cr.query(getMediaStoreUri(), projection, selection, null, MediaStore.Files.FileColumns.DATE_ADDED + " DESC");
@@ -1534,29 +1551,39 @@ public class FirstFragment extends Fragment {
     }
 
     private void loadChangeInterval() {
-        SharedPreferences preferences = requireContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        CHANGE_TIMER = preferences.getLong(KEY_CHANGE_INTERVAL, 1000 * 60 * 10);
+        CHANGE_TIMER = gallerySettings.getInterval();
         Log.i("FirstFragment", "Loaded change interval: " + CHANGE_TIMER + " ms");
     }
 
     private void loadDisplayMode() {
-        SharedPreferences preferences = requireContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        currentDisplayMode = preferences.getString(KEY_DISPLAY_MODE, DISPLAY_MODE_GRID);
-        Log.i("FirstFragment", "Loaded display mode: " + currentDisplayMode);
+        currentDisplayMode = gallerySettings.getMode();
+    }
+
+    private void refreshUploadedMedia() {
+        if (binding == null || !isAdded() || !hasImagePermission()) return;
+        singleModeItems.clear();
+        singleModeIndex = 0;
+        loadRetryCount = 0;
+        Log.i("GalleryUpload", "Refreshing media after published image upload");
+        loadImage();
+    }
+
+    private void applySavedSettings() {
+        if (binding == null) return;
+        long interval = gallerySettings.getInterval();
+        String mode = gallerySettings.getMode();
+        if (interval == CHANGE_TIMER && mode.equals(currentDisplayMode)) return;
+        CHANGE_TIMER = interval;
+        currentDisplayMode = mode;
+        singleModeIndex = 0;
+        applyDisplayModeLayout();
+        handler.removeCallbacksAndMessages(null);
+        if (hasImagePermission()) loadImage();
     }
 
     private void showSettingsDialog() {
-        settingsDialog = new SettingsDialog(requireContext(), (newInterval, newDisplayMode) -> {
-            CHANGE_TIMER = newInterval;
-            currentDisplayMode = newDisplayMode;
-            singleModeIndex = 0;
-            Log.i("FirstFragment", "Settings updated, interval: " + CHANGE_TIMER + " ms, display mode: " + currentDisplayMode);
-            applyDisplayModeLayout();
-            handler.removeCallbacksAndMessages(null);
-            if (hasImagePermission()) {
-                loadImage();
-            }
-        });
+        if (settingsDialog != null) settingsDialog.dismiss();
+        settingsDialog = new SettingsDialog(requireContext(), ((MainActivity) requireActivity()).getWebSettings());
         settingsDialog.show();
     }
 

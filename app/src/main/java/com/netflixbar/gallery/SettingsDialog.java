@@ -2,7 +2,6 @@ package com.netflixbar.gallery;
 
 import android.app.AlertDialog;
 import android.content.Context;
-import android.content.SharedPreferences;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.RadioButton;
@@ -10,102 +9,91 @@ import android.widget.RadioGroup;
 import android.widget.Spinner;
 import android.widget.TextView;
 
-import com.netflixbar.gallery.R;
+import com.netflixbar.gallery.databinding.DialogSettingsBinding;
 
 public class SettingsDialog {
 
-    private static final String PREFS_NAME = "gallery_settings";
-    private static final String KEY_CHANGE_INTERVAL = "change_interval";
-    public static final String KEY_DISPLAY_MODE = "display_mode";
-    public static final String DISPLAY_MODE_GRID = "grid";
-    public static final String DISPLAY_MODE_SINGLE = "single";
-    private static final long DEFAULT_INTERVAL = 1000 * 60 * 5; // 5 minutes
+    private final Context context;
+    private final GallerySettings settings;
+    private final WebSettingsController webSettings;
+    private AlertDialog dialog;
 
-    // Predefined time intervals in milliseconds
-    private static final long[] INTERVALS = {
-            1000 * 10,           // 10 seconds
-            1000 * 30,           // 30 seconds
-            1000 * 60,           // 1 minute
-            1000 * 60 * 2,       // 2 minutes
-            1000 * 60 * 5,       // 5 minutes
-            1000 * 60 * 10,      // 10 minutes
-            1000 * 60 * 15,      // 15 minutes
-            1000 * 60 * 30,      // 30 minutes
-            1000 * 60 * 60,      // 1 hour
-    };
-
-    private static final String[] INTERVAL_LABELS = {
-            "10 秒",
-            "30 秒",
-            "1 分钟",
-            "2 分钟",
-            "5 分钟",
-            "10 分钟",
-            "15 分钟",
-            "30 分钟",
-            "1 小时",
-    };
-
-    private Context context;
-    private SharedPreferences preferences;
-    private OnSettingsSavedListener listener;
-
-    public interface OnSettingsSavedListener {
-        void onSettingsSaved(long newInterval, String displayMode);
+    public SettingsDialog(Context context, WebSettingsController webSettings) {
+        this.context = context;
+        this.settings = new GallerySettings(context);
+        this.webSettings = webSettings;
     }
 
-    public SettingsDialog(Context context, OnSettingsSavedListener listener) {
-        this.context = context;
-        this.listener = listener;
-        this.preferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+    public void dismiss() {
+        if (dialog != null) dialog.dismiss();
     }
 
     public void show() {
         AlertDialog.Builder builder = new AlertDialog.Builder(context);
         android.view.LayoutInflater inflater = android.view.LayoutInflater.from(context);
-        android.view.View view = inflater.inflate(R.layout.dialog_settings, null);
+        DialogSettingsBinding binding = DialogSettingsBinding.inflate(inflater);
+        android.view.View view = binding.getRoot();
 
-        Spinner spinnerInterval = view.findViewById(R.id.spinner_interval);
-        RadioGroup radioGroupDisplayMode = view.findViewById(R.id.radio_group_display_mode);
-        RadioButton radioGridMode = view.findViewById(R.id.radio_grid_mode);
-        RadioButton radioSingleMode = view.findViewById(R.id.radio_single_mode);
-        TextView tvCurrentInterval = view.findViewById(R.id.tv_current_interval);
-        Button btnCancel = view.findViewById(R.id.btn_cancel);
-        Button btnSave = view.findViewById(R.id.btn_save);
+        Spinner spinnerInterval = binding.spinnerInterval;
+        RadioGroup radioGroupDisplayMode = binding.radioGroupDisplayMode;
+        RadioButton radioGridMode = binding.radioGridMode;
+        RadioButton radioSingleMode = binding.radioSingleMode;
+        TextView tvCurrentInterval = binding.tvCurrentInterval;
+        Button btnCancel = binding.btnCancel;
+        Button btnSave = binding.btnSave;
 
         // Setup spinner adapter
-        ArrayAdapter<String> adapter = new ArrayAdapter<>(context, android.R.layout.simple_spinner_item, INTERVAL_LABELS);
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(context, android.R.layout.simple_spinner_item, GallerySettings.labels());
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         spinnerInterval.setAdapter(adapter);
 
         // Load current settings and set spinner selection
-        long currentInterval = getChangeInterval();
+        long currentInterval = settings.getInterval();
         int currentPosition = getPositionForInterval(currentInterval);
         spinnerInterval.setSelection(currentPosition);
         updateCurrentIntervalText(tvCurrentInterval, currentInterval);
 
-        String currentMode = getDisplayMode();
-        if (DISPLAY_MODE_SINGLE.equals(currentMode)) {
+        String currentMode = settings.getMode();
+        if (GallerySettings.SINGLE.equals(currentMode)) {
             radioSingleMode.setChecked(true);
         } else {
             radioGridMode.setChecked(true);
         }
 
-        AlertDialog dialog = builder.setView(view).create();
+        androidx.appcompat.widget.SwitchCompat webSwitch = binding.switchWebSettings;
+        TextView webStatus = binding.tvWebStatus;
+        webSwitch.setChecked(webSettings.isEnabled());
+        webStatus.setText(webSettings.getStatus());
+        boolean[] updatingSwitch = {false};
+        webSwitch.setOnCheckedChangeListener((button, enabled) -> {
+            if (updatingSwitch[0]) return;
+            if (enabled) webSettings.enable(); else webSettings.disable();
+            updatingSwitch[0] = true;
+            webSwitch.setChecked(webSettings.isEnabled());
+            updatingSwitch[0] = false;
+            webStatus.setText(webSettings.getStatus());
+        });
+        dialog = builder.setView(view).create();
+        android.os.Handler statusHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+        Runnable refreshStatus = new Runnable() {
+            @Override public void run() {
+                webStatus.setText(webSettings.getStatus());
+                updateCurrentIntervalText(tvCurrentInterval, settings.getInterval());
+                statusHandler.postDelayed(this, 2000);
+            }
+        };
+        dialog.setOnDismissListener(ignored -> statusHandler.removeCallbacks(refreshStatus));
+        statusHandler.post(refreshStatus);
 
         btnCancel.setOnClickListener(v -> dialog.dismiss());
 
         btnSave.setOnClickListener(v -> {
             int selectedPosition = spinnerInterval.getSelectedItemPosition();
-            long newInterval = INTERVALS[selectedPosition];
+            long newInterval = GallerySettings.intervals()[selectedPosition];
             int checkedId = radioGroupDisplayMode.getCheckedRadioButtonId();
-            String newDisplayMode = checkedId == R.id.radio_single_mode ? DISPLAY_MODE_SINGLE : DISPLAY_MODE_GRID;
+            String newDisplayMode = checkedId == R.id.radio_single_mode ? GallerySettings.SINGLE : GallerySettings.GRID;
 
-            saveChangeInterval(newInterval);
-            saveDisplayMode(newDisplayMode);
-            if (listener != null) {
-                listener.onSettingsSaved(newInterval, newDisplayMode);
-            }
+            settings.save(newInterval, newDisplayMode);
             dialog.dismiss();
             android.widget.Toast.makeText(context, "设置已保存", android.widget.Toast.LENGTH_SHORT).show();
         });
@@ -114,33 +102,18 @@ public class SettingsDialog {
     }
 
     private int getPositionForInterval(long interval) {
-        for (int i = 0; i < INTERVALS.length; i++) {
-            if (INTERVALS[i] == interval) {
+        for (int i = 0; i < GallerySettings.intervals().length; i++) {
+            if (GallerySettings.intervals()[i] == interval) {
                 return i;
             }
         }
-        return 4; // Default to 10 minutes
+        return 4; // 5 minutes
     }
 
     private void updateCurrentIntervalText(TextView tv, long interval) {
-        String label = INTERVAL_LABELS[getPositionForInterval(interval)];
+        String label = GallerySettings.labels()[getPositionForInterval(interval)];
         String text = "当前时间间隔：" + label;
         tv.setText(text);
     }
 
-    public long getChangeInterval() {
-        return preferences.getLong(KEY_CHANGE_INTERVAL, DEFAULT_INTERVAL);
-    }
-
-    public void saveChangeInterval(long interval) {
-        preferences.edit().putLong(KEY_CHANGE_INTERVAL, interval).apply();
-    }
-
-    public String getDisplayMode() {
-        return preferences.getString(KEY_DISPLAY_MODE, DISPLAY_MODE_GRID);
-    }
-
-    public void saveDisplayMode(String mode) {
-        preferences.edit().putString(KEY_DISPLAY_MODE, mode).apply();
-    }
 }
