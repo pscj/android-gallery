@@ -1,24 +1,31 @@
 package com.netflixbar.gallery.entity;
 
+/** 腾讯位置服务逆地址解析响应。 */
 public class GPSResult {
-    int status;
-    ResultDTO result;
+    private Integer status;
+    private ResultDTO result;
+
+    public boolean isSuccess() {
+        return status != null && status == 0;
+    }
 
     public ResultDTO getResult() {
         return result;
     }
 
-    public int getStatus() {
-        return status;
+    public static class ResultDTO {
+        private String address;
+        private FormattedAddresses formatted_addresses;
+
+        public String getAddress() {
+            if (address != null && !address.trim().isEmpty()) {
+                return address;
+            }
+            return formatted_addresses == null ? null : formatted_addresses.recommend;
+        }
     }
 
-
-    public static class ResultDTO{
-        public String getFormatted_address() {
-            return formatted_address;
-        }
-
-        String formatted_address;
+    private static class FormattedAddresses {
+        private String recommend;
     }
 }
-

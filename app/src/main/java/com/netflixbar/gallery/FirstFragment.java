@@ -46,7 +46,6 @@ import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.fragment.app.Fragment;
 import androidx.core.content.ContextCompat;
 
-import com.google.gson.Gson;
 import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.DefaultLoadControl;
 import com.google.android.exoplayer2.DefaultRenderersFactory;
@@ -57,7 +56,6 @@ import com.google.android.exoplayer2.trackselection.TrackSelectionParameters;
 import com.google.android.exoplayer2.ui.PlayerView;
 import com.google.android.exoplayer2.util.MimeTypes;
 import com.netflixbar.gallery.databinding.FragmentFirstBinding;
-import com.netflixbar.gallery.entity.GPSResult;
 import com.netflixbar.gallery.utils.FileUtils;
 import com.netflixbar.gallery.utils.HttpUtils;
 import com.netflixbar.gallery.utils.ImageUtils;
@@ -92,7 +90,6 @@ public class FirstFragment extends Fragment {
     private Handler handler = new Handler();
     private ActivityResultLauncher<String[]> storagePermissionLauncher;
     private final List<ExoPlayer> activePlayers = new ArrayList<>();
-    private Gson gson = new Gson();
     private SettingsDialog settingsDialog;
     private GallerySettings gallerySettings;
     private final Runnable uploadRefreshRunnable = this::refreshUploadedMedia;
@@ -1703,35 +1700,30 @@ public class FirstFragment extends Fragment {
         });
     }
 
-    private String getLocation(String gpsLocation, TextView tv) {
-        if(!TextUtils.isEmpty(gpsLocation)){
-            String ak = BuildConfig.BAIDU_MAP_AK;
-            if (TextUtils.isEmpty(ak)) {
-                Log.w("getLocation", "Baidu Map AK missing; skip reverse geocoding.");
-                return null;
-            }
-            String url = "https://api.map.baidu.com/reverse_geocoding/v3/?ak=" + ak + "&output=json&coordtype=wgs84ll&language=zh-cn&location=" + gpsLocation;
-            Log.i("getLocation",gpsLocation);
-            HttpUtils.instance().httpGet(url, null, null, new HttpUtils.ICallback() {
-                @Override
-                public void onSuccess(String body) {
-                    Log.i("getLocation", body);
-                    GPSResult result= gson.fromJson(body, GPSResult.class);
-                    if(result != null && result.getStatus() == 0 && result.getResult() != null){
-                        String gpsStr = result.getResult().getFormatted_address();
-                        if(!TextUtils.isEmpty(gpsStr)){
-                            handler.post(() -> tv.setText(gpsStr));
-                        }
-                    }
-                }
-
-                @Override
-                public void onFail(int code, String errmsg) {
-
-                }
-            });
+    private void getLocation(String gpsLocation, TextView tv) {
+        if (TextUtils.isEmpty(gpsLocation)) return;
+        String key = BuildConfig.TENCENT_MAP_KEY;
+        if (TextUtils.isEmpty(key.trim())) {
+            Log.w("getLocation", "Tencent Map Key missing; skip reverse geocoding.");
+            return;
         }
-        return null;
+        HttpUtils.instance().httpGet(TencentGeocoder.URL,
+                TencentGeocoder.parameters(key, gpsLocation), null, new HttpUtils.ICallback() {
+            @Override
+            public void onSuccess(String body) {
+                String address = TencentGeocoder.parseAddress(body);
+                if (!TextUtils.isEmpty(address)) {
+                    handler.post(() -> tv.setText(address));
+                } else {
+                    Log.w("getLocation", "Tencent reverse geocoding returned no valid address.");
+                }
+            }
+
+            @Override
+            public void onFail(int code, String errmsg) {
+                Log.w("getLocation", "Tencent reverse geocoding request failed: " + code);
+            }
+        });
     }
 
     private Bitmap decodeScaledBitmap(PicItem picItem, int imgWidth, int imgHeight){

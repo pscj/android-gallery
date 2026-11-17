@@ -9,7 +9,7 @@ if (localPropsFile.exists()) {
         localProps.load(stream)
     }
 }
-def baiduMapAk = (localProps.getProperty("BAIDU_MAP_AK") ?: "").replace("\\", "\\\\").replace('"', '\\"')
+def tencentMapKey = (localProps.getProperty("TENCENT_MAP_KEY") ?: "").replace("\\", "\\\\").replace('"', '\\"')
 
 android {
     namespace "com.netflixbar.gallery"
@@ -27,7 +27,7 @@ android {
             abiFilters 'armeabi', 'x86','armeabi-v7a', 'arm64-v8a'
         }
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
-        buildConfigField "String", "BAIDU_MAP_AK", "\"${baiduMapAk}\""
+        buildConfigField "String", "TENCENT_MAP_KEY", "\"${tencentMapKey}\""
     }
 
     buildTypes {

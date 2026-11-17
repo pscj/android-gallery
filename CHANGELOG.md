@@ -399,3 +399,16 @@
 - 补充直接克隆 `v2` 的命令，相关文档链接固定指向 `v2`，便于从主分支访问最新版说明。
 - 为 `main` 准备相同 README 和本次变更记录，不合并应用代码。
 - 验证：核对两分支文档内容、链接目标和差异范围，`git diff --check` 通过；本次仅文档变更，未运行构建、测试或设备安装。
+
+### GPS 逆地址解析切换为腾讯位置服务
+
+- 将照片 GPS 逆地址解析由百度切换为腾讯 HTTPS WebService `/ws/geocoder/v1/`，使用查询参数编码；保留 EXIF 的纬度、经度顺序，并通过 `coord_type=1` 声明 WGS84 GPS 坐标，不请求周边 POI。
+- 构建配置改为从本地 `local.properties` 读取 `TENCENT_MAP_KEY` 并生成同名 BuildConfig 字段；不再读取 `BAIDU_MAP_AK`。需配置已开通 WebService API 的腾讯位置服务 Key 并重新构建，缺少 Key 时跳过请求。
+- 适配腾讯响应的 `result.address`，为空时使用 `formatted_addresses.recommend`；服务错误、缺失状态/结果、空地址及异常 JSON 不更新地址，不因解析失败崩溃。
+- 验证：新增 5 项单元测试覆盖 GPS 参数、腾讯地址字段、推荐地址回退、错误及不完整响应、异常 JSON；全量 JVM 单元测试与 Debug APK 构建通过，`git diff --check` 通过。本地尚未配置腾讯 Key，未进行真实接口联调及设备安装。
+
+### 安装运行腾讯逆地址解析版本
+
+- 本地已配置腾讯 Key，重新构建当前项目 Debug APK，并覆盖安装到 3568A（`192.168.1.102:5555`），保留应用数据。
+- 安装前核对产物绝对路径 `/Users/pscj/Project/Android/android-gallery/app/build/outputs/apk/debug/app-debug.apk`、包名 `com.netflixbar.gallery` 及目标设备型号；ADB 安装返回 `Success`。
+- 验证：设备 APK 与本地产物 SHA-256 一致：`9f8830b2e1c1de39c6687cfdbc241cc0457ac61ca7f851fe7742dfa91a443695`；冷启动 `com.netflixbar.gallery/.MainActivity` 返回 `Status: ok`、`LaunchState: COLD`。尚未验证实际照片的腾讯地址显示结果。
