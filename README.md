@@ -1,5 +1,9 @@
 # Gallery
 
+> **最新版本在 [`v2` 分支](https://github.com/pscj/android-gallery/tree/v2)。`main` 分支停留在 1.0，已不再维护。请使用 `v2` 获取最新代码、功能和修复。**
+>
+> 以下功能、构建和使用说明均以 `v2` 为准，不代表 `main` 1.0 的功能。
+
 一个用于横屏展示本地照片与视频的 Android 图库应用，适合电子相册及大屏轮播场景。应用从系统媒体库随机选择素材，根据素材数量和横竖比例安排布局，并为部分留白区域生成模糊背景。
 
 ## 主要功能
@@ -28,7 +32,14 @@
 | 构建 JDK | 建议使用 JDK 17 |
 | Java 源码兼容级别 | Java 8 |
 
-使用 Android Studio 打开项目根目录，安装 Android SDK Platform 34，配置 Gradle JDK 后同步项目。首次构建需要下载 Gradle 和 Maven 依赖。
+克隆项目后先切换到 `v2` 分支：
+
+```sh
+git clone --branch v2 https://github.com/pscj/android-gallery.git
+cd android-gallery
+```
+
+已有仓库可执行 `git switch v2`。使用 Android Studio 打开项目根目录，安装 Android SDK Platform 34，配置 Gradle JDK 后同步项目。首次构建需要下载 Gradle 和 Maven 依赖。
 
 在项目根目录的 `local.properties` 中配置本机 SDK 路径，例如：
 
@@ -80,7 +91,7 @@ Debug APK 输出到 `app/build/outputs/apk/debug/app-debug.apk`。发布构建�
 
 素材按轮随机抽取并在本轮内按路径去重，下一轮允许再次出现相同素材。素材不足、文件不可读或组合不支持时，不保证凑齐目标数量；不同展示分支有各自的等待或回退行为。
 
-详细抽样、布局、裁切、缓存和切换规则见 [图库显示模式与播放规则](plan.md)。
+详细抽样、布局、裁切、缓存和切换规则见 [图库显示模式与播放规则](https://github.com/pscj/android-gallery/blob/v2/plan.md)。
 
 ## 局域网网页设置与上传
 
@@ -125,7 +136,7 @@ curl --fail 'http://<设备IP>:8000/api/images/random' --output image.bin
 curl --fail 'http://<设备IP>:8000/api/images/random?orientation=portrait&width=1080&height=1920' --output portrait.jpg
 ```
 
-参数限制、返回格式与错误码见 [随机图片 API](docs/random-image-api.md)。
+参数限制、返回格式与错误码见 [随机图片 API](https://github.com/pscj/android-gallery/blob/v2/docs/random-image-api.md)。
 
 ## 项目结构
 
