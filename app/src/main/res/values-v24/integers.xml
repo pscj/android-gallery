@@ -1,0 +1,4 @@
+<resources>
+    <!-- API 24+ keeps SurfaceView/HDR rendering and samples it with PixelCopy. -->
+    <integer name="gallery_video_surface_type">1</integer>
+</resources>

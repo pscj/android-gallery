@@ -65,29 +65,11 @@
                 android:textColor="@color/black"
                 android:layout_marginBottom="12dp" />
 
-            <RadioGroup
-                android:id="@+id/radio_group_display_mode"
+            <Spinner
+                android:id="@+id/spinner_display_mode"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal">
-
-                <RadioButton
-                    android:id="@+id/radio_grid_mode"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="四分屏"
-                    android:textColor="@color/black"
-                    android:padding="8dp" />
-
-                <RadioButton
-                    android:id="@+id/radio_single_mode"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="单图模式"
-                    android:textColor="@color/black"
-                    android:padding="8dp" />
-
-            </RadioGroup>
+                android:layout_height="48dp"
+                android:background="@drawable/edit_text_background" />
 
         </LinearLayout>
 

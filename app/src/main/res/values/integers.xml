@@ -1,0 +1,4 @@
+<resources>
+    <!-- TextureView makes low-resolution frame sampling available on API 21-23. -->
+    <integer name="gallery_video_surface_type">2</integer>
+</resources>

@@ -5,6 +5,13 @@
     android:layout_height="match_parent"
     android:background="@color/black">
 
+    <androidx.constraintlayout.widget.Guideline
+        android:id="@+id/portrait_split"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        app:layout_constraintGuide_percent="0.5" />
+
     <FrameLayout
         android:id="@+id/frame_portrait"
         android:layout_width="0dp"
@@ -12,22 +19,32 @@
         android:layout_margin="0dp"
         android:background="@color/black"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toStartOf="@id/horizontal_container"
+        app:layout_constraintEnd_toStartOf="@id/portrait_split"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintBottom_toBottomOf="parent">
+
+        <ImageView
+            android:id="@+id/portraitImageBackground"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="centerCrop"
+            android:importantForAccessibility="no"
+            android:visibility="gone" />
 
         <ImageView
             android:id="@+id/imgview1"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:scaleType="fitCenter" />
+            android:scaleType="centerCrop" />
 
         <com.google.android.exoplayer2.ui.PlayerView
             android:id="@+id/videoView1"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:visibility="gone"
-            app:surface_type="surface_view"
+            app:surface_type="@integer/gallery_video_surface_type"
+            app:resize_mode="fit"
+            app:shutter_background_color="@android:color/transparent"
             app:use_controller="false" />
 
         <LinearLayout
@@ -78,7 +95,7 @@
         android:layout_marginStart="4dp"
         android:layout_marginEnd="4dp"
         android:orientation="vertical"
-        app:layout_constraintStart_toEndOf="@id/frame_portrait"
+        app:layout_constraintStart_toEndOf="@id/portrait_split"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintBottom_toBottomOf="parent">
@@ -95,14 +112,16 @@
                 android:id="@+id/imgview2"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:scaleType="fitCenter" />
+                android:scaleType="centerCrop" />
 
             <com.google.android.exoplayer2.ui.PlayerView
                 android:id="@+id/videoView2"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:visibility="gone"
-                app:surface_type="surface_view"
+                app:surface_type="@integer/gallery_video_surface_type"
+                app:resize_mode="fit"
+                app:shutter_background_color="@android:color/transparent"
                 app:use_controller="false" />
 
             <LinearLayout
@@ -158,14 +177,16 @@
                 android:id="@+id/imgview3"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:scaleType="fitCenter" />
+                android:scaleType="centerCrop" />
 
             <com.google.android.exoplayer2.ui.PlayerView
                 android:id="@+id/videoView3"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:visibility="gone"
-                app:surface_type="surface_view"
+                app:surface_type="@integer/gallery_video_surface_type"
+                app:resize_mode="fit"
+                app:shutter_background_color="@android:color/transparent"
                 app:use_controller="false" />
 
             <LinearLayout
@@ -235,7 +256,9 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:visibility="gone"
-            app:surface_type="surface_view"
+            app:surface_type="@integer/gallery_video_surface_type"
+            app:resize_mode="fit"
+            app:shutter_background_color="@android:color/transparent"
             app:use_controller="false" />
 
         <LinearLayout

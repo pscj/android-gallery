@@ -78,6 +78,16 @@ public class WebSettingsServerTest {
         assertEquals(10000, interval);
     }
 
+    @Test public void acceptsAllFiveDisplayModes() throws IOException {
+        for (String value : GallerySettings.modes()) {
+            String body = "{\"interval\":10000,\"displayMode\":\"" + value + "\"}";
+            assertTrue(value, post(body, "").startsWith("HTTP/1.1 200"));
+            assertTrue(request("GET", "/api/settings", "", "")
+                    .contains("\"displayMode\":\"" + value + "\""));
+        }
+        assertEquals(5, saves);
+    }
+
     @Test public void rejectsInvalidValuesWithoutPartialSave() throws IOException {
         String[] bodies = {"{}", "broken", "{interval:10000,displayMode:'grid'}",
                 "{\"interval\":10000,\"interval\":30000,\"displayMode\":\"grid\"}",

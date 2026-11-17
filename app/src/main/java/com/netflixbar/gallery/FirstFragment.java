@@ -51,7 +51,6 @@ import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.DefaultLoadControl;
 import com.google.android.exoplayer2.DefaultRenderersFactory;
 import com.google.android.exoplayer2.ExoPlayer;
-import com.google.android.exoplayer2.Format;
 import com.google.android.exoplayer2.MediaItem;
 import com.google.android.exoplayer2.Player;
 import com.google.android.exoplayer2.trackselection.TrackSelectionParameters;
@@ -73,6 +72,7 @@ import java.util.Date;
 import java.util.Map;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.Future;
 
 public class FirstFragment extends Fragment {
 
@@ -108,12 +108,22 @@ public class FirstFragment extends Fragment {
     private GestureDetector gestureDetector;
     private boolean hasMediaContent = false;
     private String currentDisplayMode = DISPLAY_MODE_GRID;
+    // 本轮展示独立于用户保存的模式，随机模式也可能展示单图。
+    private boolean showingSingleMode = false;
     private final List<PicItem> singleModeItems = new ArrayList<>();
     private int singleModeIndex = 0;
     private View currentMultiLayout;
     private int currentLayoutResId = 0;
     private final List<MediaSlot> currentMediaSlots = new ArrayList<>();
     private final Random random = new Random();
+    private DualPhotoAtmosphere dualPhotoAtmosphere;
+    private MediaAtmosphereController mediaAtmosphere;
+    private VideoPreparation videoPreparation;
+    private Future<?> videoPreparationTask;
+    private Future<?> landscapeTask, twoPhotoPrefetchTask;
+    private boolean landscapePreparing;
+    private int mediaGeneration;
+    private TwoPhotoPrefetch twoPhotoPrefetch;
     private long nextRefreshDelayMs = CHANGE_TIMER;
     private boolean refreshScheduled = false;
     private final Runnable refreshRunnable = this::loadImage;
@@ -147,6 +157,7 @@ public class FirstFragment extends Fragment {
         public int width;
         public int height;
         public String mimeType;
+        VideoPreparation.Prepared preparedVideo;
     }
 
     private static class MediaSlot {
@@ -177,6 +188,18 @@ public class FirstFragment extends Fragment {
             this.layoutRes = layoutRes;
             this.slotOrder = slotOrder;
             this.items = items;
+        }
+    }
+
+    private class TwoPhotoPrefetch {
+        final List<PicItem> items;
+        final TwoLandscapeView.Frame frame;
+        final String filesKey;
+
+        TwoPhotoPrefetch(List<PicItem> items, TwoLandscapeView.Frame frame) {
+            this.items = items;
+            this.frame = frame;
+            filesKey = pairKey(items);
         }
     }
 
@@ -230,6 +253,9 @@ public class FirstFragment extends Fragment {
     ) {
 
         binding = FragmentFirstBinding.inflate(inflater, container, false);
+        dualPhotoAtmosphere = new DualPhotoAtmosphere();
+        mediaAtmosphere = new MediaAtmosphereController();
+        videoPreparation = new VideoPreparation();
         return binding.getRoot();
 
     }
@@ -316,6 +342,12 @@ public class FirstFragment extends Fragment {
 
     @Override
     public void onDestroyView() {
+        landscapePreparing = false;
+        mediaGeneration++;
+        twoPhotoPrefetch = null;
+        if (dualPhotoAtmosphere != null) dualPhotoAtmosphere.close();
+        if (mediaAtmosphere != null) mediaAtmosphere.close();
+        if (videoPreparation != null) videoPreparation.clear();
         ((MainActivity) requireActivity()).getWebSettings().setMediaListener(null);
         if (gallerySettings != null) gallerySettings.unregister(settingsListener);
         if (settingsDialog != null) settingsDialog.dismiss();
@@ -430,10 +462,22 @@ public class FirstFragment extends Fragment {
             Log.w("FirstFragment", "Context unavailable; skip loadImage.");
             return;
         }
-        releasePlayers();
         handler.removeCallbacks(refreshRunnable);
         refreshScheduled = false;
         nextRefreshDelayMs = CHANGE_TIMER;
+        boolean explicitSingleMode = DISPLAY_MODE_SINGLE.equals(currentDisplayMode);
+        int selectedCount = GallerySettings.selectCount(currentDisplayMode, random);
+        boolean singleMode = selectedCount == 1;
+        int desiredCount = explicitSingleMode ? SINGLE_MODE_CACHE_COUNT : selectedCount;
+        int generation = ++mediaGeneration;
+        landscapePreparing = false;
+        if (landscapeTask != null) landscapeTask.cancel(true);
+        if (videoPreparationTask != null) videoPreparationTask.cancel(true);
+        if (twoPhotoPrefetchTask != null) twoPhotoPrefetchTask.cancel(true);
+        TwoPhotoPrefetch ready = twoPhotoPrefetch;
+        twoPhotoPrefetch = null;
+        if (!canPrefetchTwoPhotos() || ready == null
+                || !ready.filesKey.equals(pairKey(ready.items))) ready = null;
         ContentResolver cr = context.getContentResolver();
         boolean includeVideo = ENABLE_VIDEO && hasVideoPermission();
         String selection;
@@ -470,70 +514,537 @@ public class FirstFragment extends Fragment {
                 return;
             }
 
-            int desiredCount = DISPLAY_MODE_SINGLE.equals(currentDisplayMode) ? SINGLE_MODE_CACHE_COUNT : GRID_SLOT_COUNT;
             List<PicItem> imagelist= new ArrayList<>();
+            if (selectedCount == 2 && ready != null) imagelist.addAll(ready.items);
             int maxAttempts = pageCount > 0 ? pageCount * 2 : 10;
             int attempts = 0;
             while (imagelist.size() < desiredCount && attempts < maxAttempts) {
-                randLoadImage(cr, pageCount, imagelist, includeVideo, desiredCount);
+                randLoadImage(cr, pageCount, imagelist, includeVideo, desiredCount, singleMode);
                 attempts++;
             }
             if (imagelist.isEmpty()) {
                 Log.w("FirstFragment", "No images available to display.");
                 hasMediaContent = false;
+                if (singleMode) {
+                    singleModeItems.clear();
+                    clearSingleModeDisplay();
+                }
+                scheduleNextRefresh();
                 return;
             }
 
-            Pair<Integer, Integer> dm = Utils.getScreenSize(getActivity());
-            if (DISPLAY_MODE_SINGLE.equals(currentDisplayMode)) {
-                singleModeItems.clear();
-                singleModeItems.addAll(imagelist);
-                hasMediaContent = !singleModeItems.isEmpty();
-                applyDisplayModeLayout();
-                if (hasMediaContent) {
-                    singleModeIndex = Math.min(singleModeIndex, Math.max(0, singleModeItems.size() - 1));
-                    if (singleModeIndex >= singleModeItems.size()) {
-                        singleModeIndex = 0;
-                    }
-                    displaySingleModeItem(dm.first, dm.second);
-                } else {
-                    clearSingleModeDisplay();
-                }
-            } else {
-                LayoutPlan layoutPlan = createLayoutPlan(imagelist);
-                if (layoutPlan == null || layoutPlan.items.isEmpty()) {
-                    hasMediaContent = false;
-                    scheduleNextRefresh();
-                    return;
-                }
-                View layout = ensureMultiLayout(layoutPlan.layoutRes);
-                if (layout == null) {
-                    hasMediaContent = false;
-                    return;
-                }
-                bindMediaSlots(layoutPlan);
-                int slotWidth = dm.first / GRID_COLUMNS;
-                int slotHeight = dm.second / GRID_ROWS;
-                for (int i = 0; i < currentMediaSlots.size(); i++) {
-                    MediaSlot slot = currentMediaSlots.get(i);
-                    if (i < layoutPlan.items.size()) {
-                        PicItem item = layoutPlan.items.get(i);
-                        if (item.isVideo) {
-                            showVideo(item, slot);
-                        } else {
-                            showImage(item, slot.imageView, slot.playerView, slot.videoInfo, slot.imageLocation, slotWidth, slotHeight);
-                        }
-                    } else {
-                        clearMediaSlot(slot);
-                    }
-                }
-                hasMediaContent = true;
-            }
+            queueSampledItems(imagelist, selectedCount, ready == null ? null : ready.frame, generation);
+            return;
         } else {
             hasMediaContent = false;
         }
 
         scheduleNextRefresh();
+        if (canPrefetchTwoPhotos()) prefetchNextTwoPhotos(generation);
+    }
+
+    private void queueSampledItems(List<PicItem> items, int selectedCount,
+                                   TwoLandscapeView.Frame ready, int generation) {
+        if (selectedCount == 3) {
+            prepareThreePhotoRound(items, generation);
+            return;
+        }
+        boolean needsPreparation = false;
+        for (PicItem item : items) {
+            if (item.isVideo && item.preparedVideo == null) needsPreparation = true;
+        }
+        if (!needsPreparation) {
+            displaySampledItems(items, selectedCount, ready, generation);
+            return;
+        }
+        landscapePreparing = true;
+        videoPreparationTask = dualPhotoAtmosphere.submit(() -> {
+            try {
+                prepareQueuedVideos(items);
+                handler.post(() -> displaySampledItems(items, selectedCount, ready, generation));
+            } catch (Exception e) {
+                if (Thread.currentThread().isInterrupted()) return;
+                Log.w("VideoPreparation", "Retaining current screen while video preparation failed", e);
+                handler.post(() -> {
+                    if (binding != null && generation == mediaGeneration) {
+                        landscapePreparing = false;
+                        scheduleNextRefresh();
+                    }
+                });
+            }
+        });
+    }
+
+    private ThreePhotoArrangement.Kind threePhotoKind(List<PicItem> items) {
+        int[] widths = new int[items.size()], heights = new int[items.size()];
+        boolean[] videos = new boolean[items.size()];
+        for (int i = 0; i < items.size(); i++) {
+            widths[i] = items.get(i).width; heights[i] = items.get(i).height; videos[i] = items.get(i).isVideo;
+        }
+        return ThreePhotoArrangement.classify(widths, heights, videos);
+    }
+
+    private void prepareThreePhotoRound(List<PicItem> items, int generation) {
+        landscapePreparing = true;
+        ContentResolver resolver = requireContext().getContentResolver();
+        boolean includeVideo = ENABLE_VIDEO && hasVideoPermission();
+        landscapeTask = dualPhotoAtmosphere.submit(() -> {
+            try {
+                List<PicItem> selected = new ArrayList<>(items);
+                prepareQueuedVideos(selected);
+                for (PicItem item : selected) if (!item.isVideo) populateMediaMetadata(item);
+                ThreePhotoArrangement.Kind kind = threePhotoKind(selected);
+                if (kind == ThreePhotoArrangement.Kind.REDRAW) {
+                    selected.clear();
+                    String selection = MediaStore.Files.FileColumns.MEDIA_TYPE + (includeVideo ? " IN (1,3)" : "=1");
+                    if (Build.VERSION.SDK_INT >= 29) selection = "(" + selection + ") AND is_pending=0";
+                    int count;
+                    try (Cursor cursor = resolver.query(getMediaStoreUri(),
+                            new String[]{MediaStore.Files.FileColumns._ID}, selection, null, null)) {
+                        count = cursor == null ? 0 : cursor.getCount();
+                    }
+                    for (int attempt = 0; attempt < count * 2 && selected.size() < 3; attempt++) {
+                        if (Thread.currentThread().isInterrupted()) return;
+                        randLoadImage(resolver, count, selected, includeVideo, 3, false);
+                    }
+                    for (PicItem item : selected) if (!item.isVideo) populateMediaMetadata(item);
+                    prepareQueuedVideos(selected);
+                    kind = threePhotoKind(selected);
+                }
+                ThreePhotoArrangement.Kind resultKind = kind;
+                handler.post(() -> {
+                    if (binding == null || generation != mediaGeneration) return;
+                    landscapePreparing = false;
+                    if (resultKind == ThreePhotoArrangement.Kind.PORTRAIT_TWO_LANDSCAPES) {
+                        showOnePortraitTwoLandscapes(selected, generation);
+                        return;
+                    }
+                    if (getVideoCount(selected) == 1 && resultKind != ThreePhotoArrangement.Kind.REDRAW
+                            && resultKind != ThreePhotoArrangement.Kind.UNSUPPORTED) {
+                        showThreeMedia(selected, resultKind, generation);
+                        return;
+                    }
+                    if (resultKind == ThreePhotoArrangement.Kind.PORTRAITS) showThreePortraitPhotos(selected, generation);
+                    else if (resultKind == ThreePhotoArrangement.Kind.LANDSCAPES) {
+                        showThreeStackPhotos(selected, resultKind, generation);
+                    } else scheduleNextRefresh();
+                });
+            } catch (Exception e) {
+                if (Thread.currentThread().isInterrupted()) return;
+                Log.w("ThreePhoto", "Retaining previous screen", e);
+                handler.post(() -> {
+                    if (binding != null && generation == mediaGeneration) {
+                        landscapePreparing = false; scheduleNextRefresh();
+                    }
+                });
+            }
+        });
+    }
+
+    /** All mode entries share the same ordering, geometry, photo background and video handling. */
+    private void showOnePortraitTwoLandscapes(List<PicItem> items, int generation) {
+        List<PicItem> ordered = new ArrayList<>(items);
+        for (int i = 0; i < ordered.size(); i++) {
+            if (isPortrait(ordered.get(i))) { Collections.swap(ordered, 0, i); break; }
+        }
+        if (getVideoCount(ordered) == 1) {
+            showThreeMedia(ordered, ThreePhotoArrangement.Kind.PORTRAIT_TWO_LANDSCAPES, generation);
+        } else {
+            showThreeStackPhotos(ordered, ThreePhotoArrangement.Kind.PORTRAIT_TWO_LANDSCAPES, generation);
+        }
+    }
+
+    private void showThreeStackPhotos(List<PicItem> items, ThreePhotoArrangement.Kind kind, int generation) {
+        Pair<Integer, Integer> screen = getPlaybackCanvasSize();
+        int gap = Math.round(8 * getResources().getDisplayMetrics().density);
+        landscapePreparing = true;
+        landscapeTask = dualPhotoAtmosphere.submit(() -> {
+            try {
+                List<DualPhotoAtmosphere.Source> sources = new ArrayList<>();
+                int leftWidth = ThreePhotoArrangement.leftWidth(screen.first, gap, kind);
+                for (int i = 0; i < 3; i++) {
+                    PicItem item = items.get(i);
+                    int width = i == 0 ? leftWidth : screen.first - leftWidth - gap;
+                    int height = i == 0 ? screen.second : screen.second / 2;
+                    sources.add(new DualPhotoAtmosphere.Source(mediaKey(item), () -> decodeScaledBitmap(item, width, height)));
+                }
+                ThreeStackView.Frame frame = dualPhotoAtmosphere.prepareStack(sources, screen.first, screen.second, gap, kind);
+                handler.post(() -> {
+                    if (binding == null || generation != mediaGeneration) return;
+                    landscapePreparing = false;
+                    releasePlayers(); showingSingleMode = false; applyDisplayModeLayout();
+                    if (!(currentMultiLayout instanceof ThreeStackView)) {
+                        binding.multiMediaContainer.removeAllViews();
+                        currentMultiLayout = new ThreeStackView(requireContext());
+                        binding.multiMediaContainer.addView(currentMultiLayout, new ViewGroup.LayoutParams(-1, -1));
+                        currentLayoutResId = 0; currentMediaSlots.clear();
+                    }
+                    ((ThreeStackView) currentMultiLayout).show(frame);
+                    hasMediaContent = true; scheduleNextRefresh();
+                });
+            } catch (Exception e) {
+                if (Thread.currentThread().isInterrupted()) return;
+                Log.w("ThreePhoto", "Unable to prepare stack", e);
+                handler.post(() -> {
+                    if (binding != null && generation == mediaGeneration) {
+                        landscapePreparing = false; scheduleNextRefresh();
+                    }
+                });
+            }
+        });
+    }
+
+    private Pair<Integer, Integer> getPlaybackCanvasSize() {
+        // DisplayMetrics can exclude system-reserved pixels even when our window fills the display.
+        if (binding != null) {
+            View container = binding.multiMediaContainer;
+            if (container.getWidth() > 0 && container.getHeight() > 0) {
+                return new Pair<>(container.getWidth(), container.getHeight());
+            }
+            View root = binding.getRoot();
+            if (root.getWidth() > 0 && root.getHeight() > 0) return new Pair<>(root.getWidth(), root.getHeight());
+        }
+        return Utils.getScreenSize(getActivity());
+    }
+
+    private void showThreeMedia(List<PicItem> items, ThreePhotoArrangement.Kind kind, int generation) {
+        Pair<Integer, Integer> screen = getPlaybackCanvasSize();
+        int gap = Math.round(8 * getResources().getDisplayMetrics().density);
+        landscapePreparing = true;
+        landscapeTask = dualPhotoAtmosphere.submit(() -> {
+            try {
+                Bitmap[] photos = new Bitmap[3];
+                for (int i = 0; i < 3; i++) {
+                    PicItem item = items.get(i);
+                    if (!item.isVideo) {
+                        photos[i] = decodeScaledBitmap(item, screen.first / 2, screen.second);
+                        if (photos[i] == null) throw new IllegalStateException("无法解码三图照片");
+                    }
+                }
+                handler.post(() -> {
+                    if (binding == null || generation != mediaGeneration) return;
+                    releasePlayers();
+                    int[] widths = new int[3], heights = new int[3];
+                    for (int i = 0; i < 3; i++) { widths[i] = items.get(i).width; heights[i] = items.get(i).height; }
+                    ThreeMediaLayout root = new ThreeMediaLayout(requireContext(), widths, heights, kind, gap);
+                    View template = getLayoutInflater().inflate(R.layout.layout_media_three_portrait, root, false);
+                    EqualHeightPhotoLayout.Slot[] columns = kind == ThreePhotoArrangement.Kind.PORTRAITS
+                            ? EqualHeightPhotoLayout.calculate(widths, heights, screen.first, screen.second, gap) : null;
+                    int leftWidth = ThreePhotoArrangement.leftWidth(screen.first, gap, kind);
+                    int topHeight = (screen.second - gap) / 2;
+                    binding.multiMediaContainer.removeAllViews();
+                    currentMultiLayout = root; currentLayoutResId = 0; currentMediaSlots.clear();
+                    int[] frames = {R.id.frame1, R.id.frame2, R.id.frame3};
+                    for (int i = 0; i < 3; i++) {
+                        View frame = template.findViewById(frames[i]);
+                        ((ViewGroup) frame.getParent()).removeView(frame);
+                        int x, y, width, height;
+                        if (columns != null) {
+                            x = columns[i].left; y = 0; width = columns[i].right - x; height = screen.second;
+                        } else {
+                            x = i == 0 ? 0 : leftWidth + gap;
+                            y = i < 2 ? 0 : topHeight + gap;
+                            width = i == 0 ? leftWidth : screen.first - leftWidth - gap;
+                            height = i == 0 ? screen.second : i == 1 ? topHeight : screen.second - y;
+                        }
+                        android.widget.FrameLayout.LayoutParams params = new android.widget.FrameLayout.LayoutParams(width, height);
+                        params.leftMargin = x; params.topMargin = y;
+                        root.addView(frame, params);
+                        ImageView image = frame.findViewById(IMAGE_VIEW_IDS[i]);
+                        boolean crop = columns != null && columns[i].sourceTop > 0.01;
+                        image.setScaleType(crop ? ImageView.ScaleType.CENTER_CROP : ImageView.ScaleType.FIT_CENTER);
+                    }
+                    bindMediaSlots(new LayoutPlan(0, new int[]{0, 1, 2}, items));
+                    showingSingleMode = false; applyDisplayModeLayout();
+                    binding.multiMediaContainer.addView(root, new ViewGroup.LayoutParams(-1, -1));
+                    for (int i = 0; i < 3; i++) {
+                        PicItem item = items.get(i); MediaSlot slot = currentMediaSlots.get(i);
+                        if (item.isVideo) showVideo(item, slot);
+                        else {
+                            slot.imageView.setImageBitmap(photos[i]); slot.imageView.setVisibility(View.VISIBLE);
+                            updateMediaBackground(slot.imageView, photos[i], mediaKey(item));
+                            showImageLocation(item, slot.imageLocation);
+                        }
+                    }
+                    landscapePreparing = false; hasMediaContent = true; scheduleNextRefresh();
+                });
+            } catch (Exception e) {
+                if (Thread.currentThread().isInterrupted()) return;
+                Log.w("ThreeMedia", "Retaining previous screen", e);
+                handler.post(() -> {
+                    if (binding != null && generation == mediaGeneration) {
+                        landscapePreparing = false; scheduleNextRefresh();
+                    }
+                });
+            }
+        });
+    }
+
+    private void prepareQueuedVideos(List<PicItem> items) throws Exception {
+        for (PicItem item : items) {
+            if (!item.isVideo || item.preparedVideo != null) continue;
+            VideoPreparation.Prepared prepared = videoPreparation.prepare(item.path);
+            item.preparedVideo = prepared;
+            item.height = (prepared.rotation == 90 || prepared.rotation == 270) ? prepared.width : prepared.height;
+            item.height = Math.max(1, item.height);
+            item.width = Math.max(1, (int) Math.round(item.height * prepared.displayAspect));
+            item.durationMs = prepared.durationMs;
+            item.mimeType = prepared.mime;
+        }
+    }
+
+    private void displaySampledItems(List<PicItem> imagelist, int selectedCount,
+                                     TwoLandscapeView.Frame ready, int generation) {
+        if (binding == null || generation != mediaGeneration) return;
+        landscapePreparing = false;
+        LayoutPlan fourImagePlan = null;
+        if (selectedCount == 4) {
+            LayoutPlan candidate = fourImagePlan = createLayoutPlan(imagelist);
+            if (candidate != null && candidate.layoutRes == R.layout.layout_media_portrait_left) {
+                showOnePortraitTwoLandscapes(candidate.items, generation);
+                return;
+            }
+            if (candidate != null && candidate.layoutRes == R.layout.layout_media_three_portrait
+                    && isThreePortraitPhotos(candidate.items)) {
+                showThreePortraitPhotos(candidate.items, generation);
+                return;
+            }
+        }
+        releasePlayers();
+        boolean singleMode = selectedCount == 1;
+        Pair<Integer, Integer> dm = Utils.getScreenSize(getActivity());
+        if (singleMode) {
+            showingSingleMode = true;
+            applyDisplayModeLayout();
+            singleModeItems.clear();
+            singleModeItems.addAll(imagelist);
+            hasMediaContent = !singleModeItems.isEmpty();
+            if (hasMediaContent) {
+                singleModeIndex = Math.min(singleModeIndex, Math.max(0, singleModeItems.size() - 1));
+                if (singleModeIndex >= singleModeItems.size()) {
+                    singleModeIndex = 0;
+                }
+                displaySingleModeItem(dm.first, dm.second);
+            } else {
+                clearSingleModeDisplay();
+            }
+        } else {
+            LayoutPlan layoutPlan = selectedCount == 2
+                    ? createTwoImageLayoutPlan(imagelist) : fourImagePlan;
+            if (layoutPlan == null || layoutPlan.items.isEmpty()) {
+                hasMediaContent = false;
+                scheduleNextRefresh();
+                return;
+            }
+            if (selectedCount == 2 && isTwoLandscapePhotos(layoutPlan.items)) {
+                showTwoLandscapePhotos(layoutPlan.items, dm.first, dm.second,
+                        ready, generation);
+                return;
+            }
+            showingSingleMode = false;
+            applyDisplayModeLayout();
+            View layout = ensureMultiLayout(layoutPlan.layoutRes);
+            if (layout == null) {
+                hasMediaContent = false;
+                return;
+            }
+            if (selectedCount == 2) {
+                configureTwoImageLayout(layout, layoutPlan.items, dm.first, dm.second);
+            }
+            bindMediaSlots(layoutPlan);
+            int slotWidth = dm.first / GRID_COLUMNS;
+            int slotHeight = selectedCount == 2 ? dm.second : dm.second / GRID_ROWS;
+            for (int i = 0; i < currentMediaSlots.size(); i++) {
+                MediaSlot slot = currentMediaSlots.get(i);
+                if (i < layoutPlan.items.size()) {
+                    PicItem item = layoutPlan.items.get(i);
+                    if (item.isVideo) {
+                        showVideo(item, slot);
+                    } else {
+                        showImage(item, slot.imageView, slot.playerView, slot.videoInfo, slot.imageLocation, slotWidth, slotHeight);
+                    }
+                } else {
+                    clearMediaSlot(slot);
+                }
+            }
+            hasMediaContent = true;
+        }
+        scheduleNextRefresh();
+        if (canPrefetchTwoPhotos()) prefetchNextTwoPhotos(generation);
+    }
+
+    private boolean isTwoLandscapePhotos(List<PicItem> items) {
+        return items.size() == 2 && !items.get(0).isVideo && !items.get(1).isVideo
+                && items.get(0).width > items.get(0).height && items.get(0).height > 0
+                && items.get(1).width > items.get(1).height && items.get(1).height > 0;
+    }
+
+    private boolean isThreePortraitPhotos(List<PicItem> items) {
+        int[] widths = new int[items.size()], heights = new int[items.size()];
+        boolean[] videos = new boolean[items.size()];
+        for (int i = 0; i < items.size(); i++) {
+            widths[i] = items.get(i).width; heights[i] = items.get(i).height; videos[i] = items.get(i).isVideo;
+        }
+        return ThreePortraitPolicy.supports(widths, heights, videos);
+    }
+
+    private void showThreePortraitPhotos(List<PicItem> items, int generation) {
+        Pair<Integer, Integer> screen = getPlaybackCanvasSize();
+        int gap = Math.round(8 * getResources().getDisplayMetrics().density);
+        landscapePreparing = true;
+        landscapeTask = dualPhotoAtmosphere.submit(() -> {
+            try {
+                java.util.List<DualPhotoAtmosphere.Source> sources = new ArrayList<>();
+                int[] widths = new int[3], heights = new int[3];
+                for (int i = 0; i < 3; i++) {
+                    widths[i] = items.get(i).width; heights[i] = items.get(i).height;
+                }
+                EqualHeightPhotoLayout.Slot[] targets = EqualHeightPhotoLayout.calculate(widths, heights,
+                        screen.first, screen.second, gap);
+                for (int i = 0; i < items.size(); i++) {
+                    PicItem item = items.get(i);
+                    int decodeWidth = targets[i].right - targets[i].left;
+                    sources.add(new DualPhotoAtmosphere.Source(mediaKey(item),
+                            () -> decodeScaledBitmap(item, decodeWidth, screen.second)));
+                }
+                ThreePortraitView.Frame frame = dualPhotoAtmosphere.prepareThree(sources, screen.first, screen.second, gap);
+                handler.post(() -> {
+                    if (binding == null || generation != mediaGeneration) return;
+                    landscapePreparing = false;
+                    releasePlayers();
+                    showingSingleMode = false;
+                    applyDisplayModeLayout();
+                    if (!(currentMultiLayout instanceof ThreePortraitView)) {
+                        binding.multiMediaContainer.removeAllViews();
+                        currentMultiLayout = new ThreePortraitView(requireContext());
+                        binding.multiMediaContainer.addView(currentMultiLayout, new ViewGroup.LayoutParams(-1, -1));
+                        currentLayoutResId = 0;
+                        currentMediaSlots.clear();
+                    }
+                    ((ThreePortraitView) currentMultiLayout).show(frame);
+                    hasMediaContent = true;
+                    scheduleNextRefresh();
+                    if (canPrefetchTwoPhotos()) prefetchNextTwoPhotos(generation);
+                });
+            } catch (Exception e) {
+                if (Thread.currentThread().isInterrupted()) return;
+                Log.w("ThreePortrait", "Retaining previous screen", e);
+                handler.post(() -> {
+                    if (binding != null && generation == mediaGeneration) {
+                        landscapePreparing = false;
+                        scheduleNextRefresh();
+                    }
+                });
+            }
+        });
+    }
+
+    private String mediaKey(PicItem item) {
+        java.io.File file = new java.io.File(item.path);
+        return item.contentUri + "|" + item.path + "|" + file.length() + "|"
+                + file.lastModified() + "|" + item.orientation;
+    }
+
+    private String pairKey(List<PicItem> items) {
+        StringBuilder key = new StringBuilder();
+        for (PicItem item : items) key.append(mediaKey(item)).append('\n');
+        return key.toString();
+    }
+
+    private TwoLandscapeView.Frame prepareTwoLandscapePhotos(List<PicItem> items, int width, int height)
+            throws Exception {
+        int gap = Math.round(8 * getResources().getDisplayMetrics().density);
+        PicItem left = items.get(0), right = items.get(1);
+        int[] widths = TwoImageSizing.widths(width - gap, height,
+                left.width, left.height, right.width, right.height);
+        int leftHeight = Math.max(1, Math.min(height, Math.round(widths[0] * left.height / (float) left.width)));
+        int rightHeight = Math.max(1, Math.min(height, Math.round(widths[1] * right.height / (float) right.width)));
+        return dualPhotoAtmosphere.prepare(
+                new DualPhotoAtmosphere.Source(mediaKey(left), () -> decodeScaledBitmap(left, widths[0], leftHeight)),
+                new DualPhotoAtmosphere.Source(mediaKey(right), () -> decodeScaledBitmap(right, widths[1], rightHeight)),
+                width, height, gap);
+    }
+
+    private void showTwoLandscapePhotos(List<PicItem> items, int width, int height,
+                                       TwoLandscapeView.Frame ready, int generation) {
+        landscapePreparing = true;
+        if (ready != null && ready.width == width && ready.height == height) {
+            displayTwoLandscapeFrame(ready, generation);
+            return;
+        }
+        landscapeTask = dualPhotoAtmosphere.submit(() -> {
+            try {
+                TwoLandscapeView.Frame frame = prepareTwoLandscapePhotos(items, width, height);
+                handler.post(() -> displayTwoLandscapeFrame(frame, generation));
+            } catch (Exception e) {
+                if (Thread.currentThread().isInterrupted()) return;
+                Log.w("DualAtmosphere", "Unable to prepare photos; retaining current screen", e);
+                handler.post(() -> {
+                    if (binding != null && generation == mediaGeneration) {
+                        landscapePreparing = false;
+                        scheduleNextRefresh();
+                    }
+                });
+            }
+        });
+    }
+
+    private void displayTwoLandscapeFrame(TwoLandscapeView.Frame frame, int generation) {
+        if (binding == null || generation != mediaGeneration) return;
+        landscapePreparing = false;
+        showingSingleMode = false;
+        applyDisplayModeLayout();
+        if (!(currentMultiLayout instanceof TwoLandscapeView)) {
+            binding.multiMediaContainer.removeAllViews();
+            currentMultiLayout = new TwoLandscapeView(requireContext());
+            binding.multiMediaContainer.addView(currentMultiLayout,
+                    new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            currentLayoutResId = 0;
+            currentMediaSlots.clear();
+        }
+        ((TwoLandscapeView) currentMultiLayout).show(frame);
+        hasMediaContent = true;
+        scheduleNextRefresh();
+        prefetchNextTwoPhotos(generation);
+    }
+
+    private void prefetchNextTwoPhotos(int generation) {
+        if (!canPrefetchTwoPhotos() || binding == null) return;
+        ContentResolver resolver = requireContext().getContentResolver();
+        boolean includeVideo = ENABLE_VIDEO && hasVideoPermission();
+        Pair<Integer, Integer> screen = Utils.getScreenSize(getActivity());
+        twoPhotoPrefetchTask = dualPhotoAtmosphere.submit(() -> {
+            try {
+                String selection = MediaStore.Files.FileColumns.MEDIA_TYPE + (includeVideo ? " IN (1,3)" : "=1");
+                if (Build.VERSION.SDK_INT >= 29) selection = "(" + selection + ") AND is_pending=0";
+                int count;
+                try (Cursor cursor = resolver.query(getMediaStoreUri(),
+                        new String[]{MediaStore.Files.FileColumns._ID}, selection, null, null)) {
+                    count = cursor == null ? 0 : cursor.getCount();
+                }
+                List<PicItem> selected = new ArrayList<>();
+                for (int attempt = 0; attempt < count * 2 && selected.size() < 2; attempt++) {
+                    if (Thread.currentThread().isInterrupted()) return;
+                    randLoadImage(resolver, count, selected, includeVideo, 2, false);
+                }
+                if (selected.isEmpty()) return;
+                prepareQueuedVideos(selected);
+                LayoutPlan plan = createTwoImageLayoutPlan(selected);
+                TwoLandscapeView.Frame frame = isTwoLandscapePhotos(plan.items)
+                        ? prepareTwoLandscapePhotos(plan.items, screen.first, screen.second) : null;
+                TwoPhotoPrefetch prepared = new TwoPhotoPrefetch(plan.items, frame);
+                handler.post(() -> {
+                    if (binding != null && generation == mediaGeneration
+                            && canPrefetchTwoPhotos()) twoPhotoPrefetch = prepared;
+                });
+            } catch (Exception e) {
+                if (!Thread.currentThread().isInterrupted()) Log.w("DualAtmosphere", "Photo prefetch skipped", e);
+            }
+        });
+    }
+
+    private boolean canPrefetchTwoPhotos() {
+        return GallerySettings.TWO.equals(currentDisplayMode) || GallerySettings.RANDOM.equals(currentDisplayMode);
     }
 
     private void showImage(PicItem item, ImageView imageView, PlayerView playerView, View videoInfo, TextView locationView, int imgWidth, int imgHeight) {
@@ -545,7 +1056,12 @@ public class FirstFragment extends Fragment {
             videoInfo.setVisibility(View.GONE);
         }
         imageView.setVisibility(View.VISIBLE);
+        if (currentLayoutResId == R.layout.layout_media_two_portrait
+                && (imageView.getId() == R.id.imgview3 || imageView.getId() == R.id.imgview4)) {
+            imageView.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        }
         Bitmap bmp = decodeScaledBitmap(item, imgWidth, imgHeight);
+        updateMediaBackground(imageView, bmp, mediaKey(item));
         if (bmp != null) {
             imageView.setImageBitmap(bmp);
         } else {
@@ -562,6 +1078,12 @@ public class FirstFragment extends Fragment {
                 Log.w("FirstFragment", "Network unavailable; skip image geocoding.");
             }
         }
+    }
+
+    private void updateMediaBackground(View foreground, Bitmap bitmap, String key) {
+        if (mediaAtmosphere == null) return;
+        if (bitmap == null) mediaAtmosphere.clear(foreground);
+        else mediaAtmosphere.showPhoto(foreground, bitmap, key);
     }
 
     private void adjustFrameLayoutRatio(ImageView imageView, PicItem item) {
@@ -588,6 +1110,7 @@ public class FirstFragment extends Fragment {
         if (slot == null) {
             return;
         }
+        updateMediaBackground(slot.imageView, null, "");
         if (slot.imageView != null) {
             slot.imageView.setImageDrawable(null);
             slot.imageView.setVisibility(View.GONE);
@@ -614,6 +1137,7 @@ public class FirstFragment extends Fragment {
         if (binding == null) {
             return;
         }
+        clearSingleImageBackground();
         binding.singleImageView.setImageDrawable(null);
         binding.singleImageView.setVisibility(View.GONE);
         binding.singleVideoView.setPlayer(null);
@@ -626,7 +1150,7 @@ public class FirstFragment extends Fragment {
         if (binding == null) {
             return;
         }
-        boolean singleMode = DISPLAY_MODE_SINGLE.equals(currentDisplayMode);
+        boolean singleMode = showingSingleMode;
         binding.singleImageContainer.setVisibility(singleMode ? View.VISIBLE : View.GONE);
         if (binding.multiMediaContainer != null) {
             binding.multiMediaContainer.setVisibility(singleMode ? View.GONE : View.VISIBLE);
@@ -699,6 +1223,51 @@ public class FirstFragment extends Fragment {
         TextView imageLocation = currentMultiLayout.findViewById(IMAGE_LOCATION_IDS[index]);
         currentMediaSlots.add(new MediaSlot(imageView, playerView, videoInfo, videoTitle, videoDetails, imageLocation));
         used[index] = true;
+    }
+
+    private LayoutPlan createTwoImageLayoutPlan(List<PicItem> items) {
+        List<PicItem> selected = new ArrayList<>(items);
+        for (PicItem item : selected) {
+            populateMediaMetadata(item);
+        }
+        // 混合方向时固定竖图在左，横图在右。
+        if (selected.size() == 2 && !isPortrait(selected.get(0)) && isPortrait(selected.get(1))) {
+            Collections.swap(selected, 0, 1);
+        }
+        return new LayoutPlan(R.layout.layout_media_two, new int[]{0, 1}, selected);
+    }
+
+    private void configureTwoImageLayout(View layout, List<PicItem> items, int screenWidth, int screenHeight) {
+        View left = layout.findViewById(R.id.frame_portrait_left);
+        View right = layout.findViewById(R.id.frame_portrait_right);
+        android.widget.LinearLayout.LayoutParams leftParams =
+                (android.widget.LinearLayout.LayoutParams) left.getLayoutParams();
+        android.widget.LinearLayout.LayoutParams rightParams =
+                (android.widget.LinearLayout.LayoutParams) right.getLayoutParams();
+        leftParams.width = 0;
+        rightParams.width = 0;
+        leftParams.weight = 1;
+        rightParams.weight = 1;
+        ImageView leftImage = layout.findViewById(R.id.imgview1);
+        leftImage.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        if (items.size() == 2) {
+            PicItem first = items.get(0);
+            PicItem second = items.get(1);
+            int availableWidth = screenWidth - leftParams.getMarginEnd()
+                    - rightParams.getMarginStart();
+            int[] widths = TwoImageSizing.widths(availableWidth, screenHeight,
+                    first.width, first.height, second.width, second.height);
+            leftParams.width = widths[0];
+            rightParams.width = widths[1];
+            leftParams.weight = 0;
+            rightParams.weight = 0;
+            if (isPortrait(first) && !isPortrait(second)) {
+                // 极端宽高比时允许横向裁切，保证竖图始终填满高度。
+                leftImage.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            }
+        }
+        left.setLayoutParams(leftParams);
+        right.setLayoutParams(rightParams);
     }
 
     private LayoutPlan createLayoutPlan(List<PicItem> items) {
@@ -829,25 +1398,40 @@ public class FirstFragment extends Fragment {
         binding.singleVideoView.setVisibility(View.GONE);
         binding.singleVideoInfo.setVisibility(View.GONE);
         binding.singleImageView.setVisibility(View.VISIBLE);
+        clearSingleImageBackground();
         Bitmap bmp = decodeScaledBitmap(item, screenWidth, screenHeight);
+        boolean landscape = bmp != null && bmp.getWidth() > bmp.getHeight();
         if (bmp != null) {
+            binding.singleImageView.setScaleType(landscape
+                    ? ImageView.ScaleType.CENTER_CROP : ImageView.ScaleType.FIT_CENTER);
             binding.singleImageView.setImageBitmap(bmp);
         } else {
             binding.singleImageView.setImageDrawable(null);
         }
+        updateMediaBackground(binding.singleImageView, landscape ? null : bmp, mediaKey(item));
         updateSingleLocation(item);
     }
 
+    private void clearSingleImageBackground() {
+        if (mediaAtmosphere != null) mediaAtmosphere.clear(binding.singleImageView);
+        binding.singleImageBackground.setImageDrawable(null);
+        binding.singleImageBackground.setVisibility(View.GONE);
+    }
+
     private void showVideoInSingleMode(PicItem item) {
+        clearSingleImageBackground();
         binding.singleImageView.setImageDrawable(null);
         binding.singleImageView.setVisibility(View.GONE);
         binding.singleVideoView.setVisibility(View.VISIBLE);
+        binding.singleVideoInfo.setVisibility(View.GONE);
 
         DefaultRenderersFactory renderersFactory = new DefaultRenderersFactory(requireContext())
                 .setEnableDecoderFallback(true)
                 .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER);
 
         DefaultLoadControl loadControl = new DefaultLoadControl.Builder()
+                .setTargetBufferBytes(8 * 1024 * 1024)
+                .setPrioritizeTimeOverSizeThresholds(false)
                 .setBufferDurationsMs(
                         VIDEO_BACKBUFFER_MS,
                         VIDEO_BUFFER_MS,
@@ -866,6 +1450,7 @@ public class FirstFragment extends Fragment {
                         MimeTypes.VIDEO_VP9,
                         MimeTypes.VIDEO_AV1);
         player.setTrackSelectionParameters(trackBuilder.build());
+        player.setVideoScalingMode(C.VIDEO_SCALING_MODE_SCALE_TO_FIT);
         player.setRepeatMode(Player.REPEAT_MODE_ALL);
         player.setMediaItem(MediaItem.fromUri(item.contentUri));
         player.addListener(new Player.Listener() {
@@ -876,18 +1461,7 @@ public class FirstFragment extends Fragment {
                     if (duration != C.TIME_UNSET) {
                         extendRefreshIfNeeded(duration);
                     }
-                    updateSingleVideoInfo(item, player);
-                    handler.postDelayed(() -> {
-                        if (binding.singleVideoView.getPlayer() == player) {
-                            updateSingleVideoInfo(item, player);
-                        }
-                    }, 2000);
                 }
-            }
-
-            @Override
-            public void onTracksChanged(com.google.android.exoplayer2.Tracks tracks) {
-                updateSingleVideoInfo(item, player);
             }
         });
         player.prepare();
@@ -898,6 +1472,7 @@ public class FirstFragment extends Fragment {
         player.play();
         binding.singleVideoView.setPlayer(player);
         activePlayers.add(player);
+        mediaAtmosphere.showVideo(binding.singleVideoView, player, item.preparedVideo);
         updateSingleLocation(item);
     }
 
@@ -912,58 +1487,20 @@ public class FirstFragment extends Fragment {
         }
     }
 
-    private void updateSingleVideoInfo(PicItem item, ExoPlayer player) {
-        String fileName = new java.io.File(item.path).getName();
-        StringBuilder detailText = new StringBuilder();
-        try {
-            com.google.android.exoplayer2.Tracks tracks = player.getCurrentTracks();
-            if (tracks != null) {
-                for (com.google.android.exoplayer2.Tracks.Group group : tracks.getGroups()) {
-                    if (group.getType() == com.google.android.exoplayer2.C.TRACK_TYPE_VIDEO && group.isSelected()) {
-                        int selectedIndex = -1;
-                        for (int i = 0; i < group.length; i++) {
-                            if (group.isTrackSelected(i)) {
-                                selectedIndex = i;
-                                break;
-                            }
-                        }
-                        if (selectedIndex >= 0) {
-                            Format format = group.getTrackFormat(selectedIndex);
-                            if (format != null) {
-                                String resolution = format.width + "x" + format.height;
-                                String codec = format.sampleMimeType != null ? format.sampleMimeType : "Unknown";
-                                String fps = format.frameRate != Format.NO_VALUE ?
-                                        String.format("%.0fp", format.frameRate) : "Unknown";
-                                String bitrate = getVideoBitrate(format, item, player);
-                                detailText.append(String.format("Res: %s %s | Codec: %s | Bitrate: %s",
-                                        resolution, fps, codec, bitrate));
-                            }
-                        }
-                        break;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            Log.e("FirstFragment", "Error getting single video info", e);
-        }
-        if (detailText.length() == 0) {
-            detailText.append("Loading video info...");
-        }
-        binding.singleVideoTitle.setText(fileName + " - ");
-        binding.singleVideoDetails.setText(detailText.toString());
-        binding.singleVideoInfo.setVisibility(View.VISIBLE);
-    }
-
     private void showVideo(PicItem item, MediaSlot slot) {
         if (slot == null || slot.playerView == null) {
             Log.w("FirstFragment", "Missing player view for video slot");
             return;
         }
+        updateMediaBackground(slot.imageView, null, "");
         if (slot.imageView != null) {
             slot.imageView.setImageDrawable(null);
             slot.imageView.setVisibility(View.GONE);
         }
         slot.playerView.setVisibility(View.VISIBLE);
+        if (slot.videoInfo != null) {
+            slot.videoInfo.setVisibility(View.GONE);
+        }
 
         // API 29+ HDR 支持：设置窗口为 HDR 模式（仅当设备支持 HDR 时）
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && isHdrSupported()) {
@@ -976,6 +1513,8 @@ public class FirstFragment extends Fragment {
                 .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER);
 
         DefaultLoadControl loadControl = new DefaultLoadControl.Builder()
+                .setTargetBufferBytes(8 * 1024 * 1024)
+                .setPrioritizeTimeOverSizeThresholds(false)
                 .setBufferDurationsMs(
                         VIDEO_BACKBUFFER_MS,
                         VIDEO_BUFFER_MS,
@@ -994,6 +1533,7 @@ public class FirstFragment extends Fragment {
                         MimeTypes.VIDEO_VP9,
                         MimeTypes.VIDEO_AV1);
         player.setTrackSelectionParameters(trackBuilder.build());
+        player.setVideoScalingMode(C.VIDEO_SCALING_MODE_SCALE_TO_FIT);
         player.setRepeatMode(Player.REPEAT_MODE_ALL);
         player.setMediaItem(MediaItem.fromUri(item.contentUri));
         player.addListener(new Player.Listener() {
@@ -1004,20 +1544,7 @@ public class FirstFragment extends Fragment {
                     if (duration != C.TIME_UNSET) {
                         extendRefreshIfNeeded(duration);
                     }
-                    updateVideoInfo(slot, item, player);
-
-                    // 延迟一点时间再次更新码率信息，因为有些信息可能需要时间加载
-                    handler.postDelayed(() -> {
-                        if (slot.playerView != null && slot.playerView.getPlayer() == player) {
-                            updateVideoInfo(slot, item, player);
-                        }
-                    }, 2000);
                 }
-            }
-
-            @Override
-            public void onTracksChanged(com.google.android.exoplayer2.Tracks tracks) {
-                updateVideoInfo(slot, item, player);
             }
         });
         player.prepare();
@@ -1028,6 +1555,7 @@ public class FirstFragment extends Fragment {
         player.play();
         slot.playerView.setPlayer(player);
         activePlayers.add(player);
+        mediaAtmosphere.showVideo(slot.playerView, player, item.preparedVideo);
 
         // 显示位置信息
 //        if (isNetworkAvailable()) {
@@ -1035,120 +1563,6 @@ public class FirstFragment extends Fragment {
 //        } else {
 //            Log.w("FirstFragment", "Network unavailable; skip video geocoding.");
 //        }
-    }
-
-    private void updateVideoInfo(MediaSlot slot, PicItem item, ExoPlayer player) {
-        if (slot == null || slot.videoTitle == null || slot.videoDetails == null || slot.videoInfo == null) {
-            return;
-        }
-        String fileName = new java.io.File(item.path).getName();
-
-        StringBuilder detailText = new StringBuilder();
-
-        try {
-            com.google.android.exoplayer2.Tracks tracks = player.getCurrentTracks();
-            if (tracks != null) {
-                for (com.google.android.exoplayer2.Tracks.Group group : tracks.getGroups()) {
-                    if (group.getType() == com.google.android.exoplayer2.C.TRACK_TYPE_VIDEO && group.isSelected()) {
-                        // Get selected track index
-                        int selectedIndex = -1;
-                        for (int i = 0; i < group.length; i++) {
-                            if (group.isTrackSelected(i)) {
-                                selectedIndex = i;
-                                break;
-                            }
-                        }
-                        if (selectedIndex >= 0) {
-                            Format format = group.getTrackFormat(selectedIndex);
-                            if (format != null) {
-                                String resolution = format.width + "x" + format.height;
-                                String codec = format.sampleMimeType != null ? format.sampleMimeType : "Unknown";
-                                String fps = format.frameRate != Format.NO_VALUE ?
-                                        String.format("%.0fp", format.frameRate) : "Unknown";
-
-                                // 尝试多种方式获取码率
-                                String bitrate = getVideoBitrate(format, item, player);
-
-                                detailText.append(String.format("Res: %s %s | Codec: %s | Bitrate: %s",
-                                        resolution, fps, codec, bitrate));
-                            }
-                        }
-                        break;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            Log.e("FirstFragment", "Error getting video info", e);
-            detailText.append("Unable to retrieve video info");
-        }
-
-        if (detailText.length() == 0) {
-            detailText.append("Loading video info...");
-        }
-        slot.videoTitle.setText(fileName + " - ");
-        slot.videoDetails.setText(detailText.toString());
-        slot.videoInfo.setVisibility(View.VISIBLE);
-    }
-
-    private String getVideoBitrate(Format format, PicItem item, ExoPlayer player) {
-        // 方法1: 直接从 Format 获取
-        if (format.bitrate != Format.NO_VALUE) {
-            return String.format("%.1f Mbps", format.bitrate / 1_000_000.0);
-        }
-
-        // 方法2: 从文件大小和 ExoPlayer 时长估算
-        try {
-            java.io.File videoFile = new java.io.File(item.path);
-            long fileSizeBytes = videoFile.length();
-            long durationMs = player.getDuration();
-
-            // 如果 ExoPlayer 时长无效，使用 PicItem 时长
-            if (durationMs <= 0 || durationMs == C.TIME_UNSET) {
-                durationMs = item.durationMs;
-            }
-
-            // 方法3: 使用 MediaMetadataRetriever 获取时长
-            if (durationMs <= 0) {
-                durationMs = getVideoDurationFromMetadata(item.path);
-            }
-
-            Log.d("BitrateCalc", "File: " + item.path + ", Size: " + fileSizeBytes + " bytes, Duration: " + durationMs + " ms");
-
-            if (fileSizeBytes > 0 && durationMs > 0) {
-                // 计算平均码率 (bits per second)
-                // 公式: (文件大小(bytes) * 8) / 时长(seconds) = bits per second
-                long bitrateBps = (fileSizeBytes * 8) / (durationMs / 1000);
-                Log.d("BitrateCalc", "Calculated bitrate: " + bitrateBps + " bps");
-                return String.format("%.1f Mbps", bitrateBps / 1_000_000.0);
-            }
-        } catch (Exception e) {
-            Log.w("FirstFragment", "Failed to calculate bitrate from file", e);
-        }
-
-        return "Unknown";
-    }
-
-    private long getVideoDurationFromMetadata(String filePath) {
-        MediaMetadataRetriever retriever = null;
-        try {
-            retriever = new MediaMetadataRetriever();
-            retriever.setDataSource(filePath);
-            String durationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
-            if (durationStr != null) {
-                return Long.parseLong(durationStr);
-            }
-        } catch (Exception e) {
-            Log.w("FirstFragment", "Failed to get duration from metadata", e);
-        } finally {
-            if (retriever != null) {
-                try {
-                    retriever.release();
-                } catch (Exception e) {
-                    // ignore
-                }
-            }
-        }
-        return 0;
     }
 
     private String getFileSize(String filePath) {
@@ -1207,6 +1621,7 @@ public class FirstFragment extends Fragment {
     }
 
     private void releasePlayers() {
+        if (mediaAtmosphere != null) mediaAtmosphere.stopVideos();
         // API 29+ HDR 支持：恢复窗口为正常模式
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             requireActivity().getWindow().setColorMode(ActivityInfo.COLOR_MODE_DEFAULT);
@@ -1280,7 +1695,7 @@ public class FirstFragment extends Fragment {
             if (uri != null) {
                 Log.d("MediaScan", "Scan completed for: " + uri);
                 handler.post(() -> {
-                    if (hasImagePermission() && !hasMediaContent) {
+                    if (hasImagePermission() && !hasMediaContent && !landscapePreparing) {
                         loadImage();
                     }
                 });
@@ -1456,7 +1871,7 @@ public class FirstFragment extends Fragment {
     }
 
 
-    private void randLoadImage(ContentResolver cr, int pageCount, List<PicItem> imglist, boolean includeVideo, int desiredCount){
+    private void randLoadImage(ContentResolver cr, int pageCount, List<PicItem> imglist, boolean includeVideo, int desiredCount, boolean singleMode){
         Log.i("randLoadImage", "start");
         int selectPage = getRandNum(pageCount);
         Log.i("randLoadImage", "pageCount="+pageCount);
@@ -1510,10 +1925,19 @@ public class FirstFragment extends Fragment {
                         }
                     } else if (mediaType == MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE) {
                         int oriVal = landScapeValue(filePath);
-                        String gpsLocation = getGpsLocation(filePath);
                         if(imglist.size() < desiredCount && !listContains(imglist,filePath)){
                             Uri uri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, itemId);
-                            imglist.add(new PicItem(filePath, oriVal, gpsLocation, false, uri, CHANGE_TIMER));
+                            PicItem item = new PicItem(filePath, oriVal, null, false, uri, CHANGE_TIMER);
+                            if (singleMode) {
+                                populateMediaMetadata(item);
+                                // Only accept landscape images after correcting EXIF orientation.
+                                if (item.width <= item.height || item.height <= 0) {
+                                    Log.i("randLoadImage", "Skipping non-landscape image in single mode: " + filePath);
+                                    break;
+                                }
+                            }
+                            item.gpsLocation = getGpsLocation(filePath);
+                            imglist.add(item);
                         }
                     }
                     fetched++;
@@ -1557,11 +1981,13 @@ public class FirstFragment extends Fragment {
 
     private void loadDisplayMode() {
         currentDisplayMode = gallerySettings.getMode();
+        showingSingleMode = DISPLAY_MODE_SINGLE.equals(currentDisplayMode);
     }
 
     private void refreshUploadedMedia() {
         if (binding == null || !isAdded() || !hasImagePermission()) return;
         singleModeItems.clear();
+        twoPhotoPrefetch = null;
         singleModeIndex = 0;
         loadRetryCount = 0;
         Log.i("GalleryUpload", "Refreshing media after published image upload");
@@ -1575,8 +2001,8 @@ public class FirstFragment extends Fragment {
         if (interval == CHANGE_TIMER && mode.equals(currentDisplayMode)) return;
         CHANGE_TIMER = interval;
         currentDisplayMode = mode;
+        twoPhotoPrefetch = null;
         singleModeIndex = 0;
-        applyDisplayModeLayout();
         handler.removeCallbacksAndMessages(null);
         if (hasImagePermission()) loadImage();
     }

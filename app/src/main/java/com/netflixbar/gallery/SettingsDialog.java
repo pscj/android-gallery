@@ -4,8 +4,6 @@ import android.app.AlertDialog;
 import android.content.Context;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
-import android.widget.RadioButton;
-import android.widget.RadioGroup;
 import android.widget.Spinner;
 import android.widget.TextView;
 
@@ -35,9 +33,7 @@ public class SettingsDialog {
         android.view.View view = binding.getRoot();
 
         Spinner spinnerInterval = binding.spinnerInterval;
-        RadioGroup radioGroupDisplayMode = binding.radioGroupDisplayMode;
-        RadioButton radioGridMode = binding.radioGridMode;
-        RadioButton radioSingleMode = binding.radioSingleMode;
+        Spinner spinnerDisplayMode = binding.spinnerDisplayMode;
         TextView tvCurrentInterval = binding.tvCurrentInterval;
         Button btnCancel = binding.btnCancel;
         Button btnSave = binding.btnSave;
@@ -54,10 +50,13 @@ public class SettingsDialog {
         updateCurrentIntervalText(tvCurrentInterval, currentInterval);
 
         String currentMode = settings.getMode();
-        if (GallerySettings.SINGLE.equals(currentMode)) {
-            radioSingleMode.setChecked(true);
-        } else {
-            radioGridMode.setChecked(true);
+        ArrayAdapter<String> modeAdapter = new ArrayAdapter<>(context,
+                android.R.layout.simple_spinner_item, GallerySettings.modeLabels());
+        modeAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        spinnerDisplayMode.setAdapter(modeAdapter);
+        String[] modes = GallerySettings.modes();
+        for (int i = 0; i < modes.length; i++) {
+            if (modes[i].equals(currentMode)) spinnerDisplayMode.setSelection(i);
         }
 
         androidx.appcompat.widget.SwitchCompat webSwitch = binding.switchWebSettings;
@@ -90,8 +89,7 @@ public class SettingsDialog {
         btnSave.setOnClickListener(v -> {
             int selectedPosition = spinnerInterval.getSelectedItemPosition();
             long newInterval = GallerySettings.intervals()[selectedPosition];
-            int checkedId = radioGroupDisplayMode.getCheckedRadioButtonId();
-            String newDisplayMode = checkedId == R.id.radio_single_mode ? GallerySettings.SINGLE : GallerySettings.GRID;
+            String newDisplayMode = modes[spinnerDisplayMode.getSelectedItemPosition()];
 
             settings.save(newInterval, newDisplayMode);
             dialog.dismiss();

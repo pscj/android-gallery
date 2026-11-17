@@ -22,15 +22,16 @@
             android:id="@+id/imgview1"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:adjustViewBounds="true"
-            android:scaleType="fitCenter" />
+            android:scaleType="centerCrop" />
 
         <com.google.android.exoplayer2.ui.PlayerView
             android:id="@+id/videoView1"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:visibility="gone"
-            app:surface_type="surface_view"
+            app:surface_type="@integer/gallery_video_surface_type"
+            app:resize_mode="fit"
+            app:shutter_background_color="@android:color/transparent"
             app:use_controller="false" />
 
         <LinearLayout
@@ -90,15 +91,16 @@
             android:id="@+id/imgview2"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:adjustViewBounds="true"
-            android:scaleType="fitCenter" />
+            android:scaleType="centerCrop" />
 
         <com.google.android.exoplayer2.ui.PlayerView
             android:id="@+id/videoView2"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:visibility="gone"
-            app:surface_type="surface_view"
+            app:surface_type="@integer/gallery_video_surface_type"
+            app:resize_mode="fit"
+            app:shutter_background_color="@android:color/transparent"
             app:use_controller="false" />
 
         <LinearLayout
@@ -158,15 +160,16 @@
             android:id="@+id/imgview3"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:adjustViewBounds="true"
-            android:scaleType="fitCenter" />
+            android:scaleType="centerCrop" />
 
         <com.google.android.exoplayer2.ui.PlayerView
             android:id="@+id/videoView3"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:visibility="gone"
-            app:surface_type="surface_view"
+            app:surface_type="@integer/gallery_video_surface_type"
+            app:resize_mode="fit"
+            app:shutter_background_color="@android:color/transparent"
             app:use_controller="false" />
 
         <LinearLayout
@@ -226,15 +229,16 @@
             android:id="@+id/imgview4"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:adjustViewBounds="true"
-            android:scaleType="fitCenter" />
+            android:scaleType="centerCrop" />
 
         <com.google.android.exoplayer2.ui.PlayerView
             android:id="@+id/videoView4"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:visibility="gone"
-            app:surface_type="surface_view"
+            app:surface_type="@integer/gallery_video_surface_type"
+            app:resize_mode="fit"
+            app:shutter_background_color="@android:color/transparent"
             app:use_controller="false" />
 
         <LinearLayout
